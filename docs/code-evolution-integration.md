@@ -1,6 +1,10 @@
-# Generated calculators in EvolveKit
+# Generated business tools in EvolveKit
 
-Open **Calculators** in the local demo. Maya can describe a calculator, supply independent expected results, build a preview, try inputs, inspect source, and send it for review. Arun can approve the exact source and activate it. Restore the previous calculator from the active view. The first restoration returns to an empty calculator slot; all proposals, approvals, and release records remain stored.
+Open **Business tools** in the local demo. Maya can describe a calculator or decision tool, supply independent expected results, build a preview, try inputs, inspect source, and send it for review. Arun can approve the exact source and activate it. Restore the previous tool from the active view. The first restoration returns to an empty tool slot; all proposals, approvals, and release records remain stored.
+
+Choose **Discount eligibility · free built-in example** to try a fixed, host-authored decision tool without an AI call. It accepts a customer tier, order amount, and overdue-payment flag and returns a decision, discount percentage, and explanation. Overdue payment blocks the discount; otherwise a gold customer with an order of at least 10,000 gets ten percent. Cases cover priority, the threshold, other tiers, and case/space normalization. Only the exact bundled request and cases use this free source; custom or changed rules use Gemini. The example still passes compilation, Docker checks, source review, approval, and rollback. It does not change orders.
+
+Gemini HTTP 429 responses show a usage-limit message with the free example as an alternative. Retrying a failed draft creates a new request key; duplicate clicks while a request is pending retain idempotency. A live synthetic custom decision request returned HTTP 429 during verification, so provider availability remains a separate limitation from the implemented typed execution path.
 
 ## Request to local activation
 
@@ -13,7 +17,7 @@ Open **Calculators** in the local demo. Maya can describe a calculator, supply i
 
 ## Contracts and storage
 
-The API in `apps/demo-api/src/code.ts` exposes `GET/POST /v1/code-proposals`, proposal `submit`, `approve`, and `activate` actions, `POST /v1/code-evaluate`, and `POST /v1/code-rollback`. Input records contain 1–20 finite numeric values; proposals need 3–30 independent cases. Evaluation input keys must match the case contract. Authorization and application/tenant scope come from the signed server session.
+The API in `apps/demo-api/src/code.ts` exposes `GET/POST /v1/code-proposals`, proposal `submit`, `approve`, and `activate` actions, `POST /v1/code-evaluate`, and `POST /v1/code-rollback`. The framework-independent contract in `packages/core/src/generated-tools.ts` allows 1–20 named values: finite numbers bounded to ±1e12, text up to 500 characters, or booleans. Proposals need 3–30 cases with consistent input and output fields and types. Runtime inputs and outputs must match that exact contract; values are not coerced. Arrays, nested objects, null, reserved prototype fields, and extra fields are rejected. Old numeric-only drafts remain compatible. Authorization and scope come from the signed server session.
 
 States are Queued → Generating → Ready → PendingApproval → Approved → Published, with generation errors entering Failed. `CodeProposal`, `CodeApproval`, `CodeActive`, and `CodeRelease` persist the lifecycle. Database constraints protect scope, immutable generated source, approvals, and release history. The existing framework-independent Capability Registry remains separate from this experimental generated-code path.
 
@@ -32,4 +36,4 @@ Export uses a separate Git index, writes the exact stored files, cases, and revi
 
 Run database generation/migrations, build SDK packages, and start the API and frontend as described in README. Gemini requires the existing server-side environment configuration. Calculator generation and evaluation need the Docker engine and the official Node sandbox image; ordinary registry changes only need PostgreSQL. Sandbox containers have no network, host mounts, API keys, or Docker socket, and enforce memory, CPU, process, filesystem, and execution limits.
 
-The integration suite covers request replay, permissions, source immutability, exact approval, tenant isolation, concurrent activation, stale base/generation rejection, durable reads, and rollback. Unit checks cover source restrictions and sandbox configuration. Production authentication, shared job infrastructure, deployment gates, and security review remain necessary before exposing this outside the loopback demo. Numeric calculators are the current generated feature contract; arbitrary pages, database-changing code, and external integrations are outside it.
+The integration suite covers request replay, permissions, source immutability, exact approval, tenant isolation, concurrent activation, stale base/generation rejection, durable reads, rollback, and typed decision preview/activation parity. Unit checks cover source restrictions, typed contracts, and sandbox configuration. Production authentication, shared job infrastructure, deployment gates, and security review remain necessary before exposing this outside the loopback demo. Pure calculations and business decisions are the generated feature contract; arbitrary pages, database-changing code, and external integrations are outside it. Decisions currently use manually entered inputs and do not automatically apply discounts to orders.

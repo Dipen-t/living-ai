@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { discountExample } from '@evolvekit/core';
 import {
   validateDraft,
   validateCases,
@@ -19,6 +20,25 @@ const draft = {
 };
 const cases = [1, 2, 0].map((amount) => ({ input: { amount }, expected: { total: amount * 2 } }));
 describe('code evolution draft boundaries', () => {
+  it('serves only the exact fixed starter without an AI call', async () => {
+    const noFetch = async () => {
+      throw new Error('Unexpected AI call');
+    };
+    expect(
+      await generateDraft(discountExample.request, discountExample.cases, { fetch: noFetch }),
+    ).toEqual(discountExample.draft);
+    await expect(
+      generateDraft(discountExample.request + ' Change the rule.', discountExample.cases, {
+        apiKey: 'test',
+        fetch: noFetch,
+      }),
+    ).rejects.toThrow('Unexpected AI call');
+    const changed = structuredClone(discountExample.cases);
+    changed[0].expected.discountPercent = 20;
+    await expect(
+      generateDraft(discountExample.request, changed, { apiKey: 'test', fetch: noFetch }),
+    ).rejects.toThrow('Unexpected AI call');
+  });
   it('accepts bounded source without tying its numeric feature to registered capabilities', () => {
     expect(validateDraft(draft)).toEqual(draft);
     expect(validateCases(cases)).toEqual(cases);
@@ -93,6 +113,29 @@ describe('code evolution draft boundaries', () => {
           new Response(JSON.stringify({ candidates: [{ finishReason: 'MAX_TOKENS' }] })),
       }),
     ).rejects.toThrow('incomplete');
+  });
+  it('requests a typed decision contract and keeps numeric-only drafts compatible', async () => {
+    const decisionCases = [true, false, true].map((eligible) => ({
+      input: { tier: 'gold', eligible },
+      expected: { reason: 'Checked', eligible },
+    }));
+    let prompt = '';
+    await generateDraft('Check eligibility', decisionCases, {
+      apiKey: 'test',
+      fetch: async (_url, options) => {
+        prompt = options.body;
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(draft) }] } },
+            ],
+          }),
+        );
+      },
+    });
+    expect(prompt).toContain('number | string | boolean');
+    expect(validateCases(decisionCases)).toEqual(decisionCases);
+    expect(validateCases(cases)).toEqual(cases);
   });
   it('uses network and filesystem isolation, resource bounds, and no host mounts or secrets', () => {
     const args = dockerRunArgs('draft-test', 'image-test');
