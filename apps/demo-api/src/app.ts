@@ -22,12 +22,16 @@ import {
   customers,
 } from '../../demo-erp/src/fixtures';
 import { registerFollowUpRoutes } from './followups';
+import { registerCodeRoutes, type CodeEngine } from './code';
 
 export const demoAccounts: Record<string, DemoSession> = {
   requester: {
     displayName: 'Maya · Requester',
     principal: { applicationId: 'demo-erp', tenantId: 'demo-org', subjectId: 'maya' },
     permissions: [
+      'code:read',
+      'code:request',
+      'code:submit',
       'evolution:read',
       'evolution:request',
       'evolution:refine',
@@ -42,6 +46,10 @@ export const demoAccounts: Record<string, DemoSession> = {
     displayName: 'Arun · Approver',
     principal: { applicationId: 'demo-erp', tenantId: 'demo-org', subjectId: 'arun' },
     permissions: [
+      'code:read',
+      'code:approve',
+      'code:activate',
+      'code:rollback',
       'evolution:read',
       'evolution:approve',
       'evolution:publish',
@@ -62,6 +70,7 @@ export async function createDemoApi(options: {
   planner?: PlannerProvider;
   plannerMode?: 'local' | 'gemini' | 'test';
   runWorker?: boolean;
+  codeEngine?: CodeEngine;
 }) {
   const db = new PrismaClient({ datasources: { db: { url: options.databaseUrl } } });
   const app = Fastify({
@@ -152,6 +161,13 @@ export async function createDemoApi(options: {
     plannerMode: options.planner ? (options.plannerMode ?? 'test') : 'unconfigured',
   });
   await registerFollowUpRoutes(app, db, session);
+  const stopCodeWorker = await registerCodeRoutes(
+    app,
+    db,
+    session,
+    options.codeEngine,
+    options.runWorker !== false,
+  );
   app.get('/health', async () => {
     await db.$queryRaw`SELECT 1`;
     return {
@@ -182,6 +198,7 @@ export async function createDemoApi(options: {
         )
       : async () => {};
   app.addHook('onClose', async () => {
+    await stopCodeWorker();
     await stopWorker();
     await db.$disconnect();
   });

@@ -8,7 +8,20 @@ import ts from 'typescript';
 
 export const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const demoRequire = createRequire(path.join(workspace, 'apps/demo-erp/package.json'));
-export const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const stable = (value) =>
+  Array.isArray(value)
+    ? value.map(stable)
+    : plain(value)
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, stable(value[key])]),
+        )
+      : value;
+export const hash = (value) =>
+  createHash('sha256')
+    .update(JSON.stringify(stable(value)))
+    .digest('hex');
 const fail = (message) => {
   throw new Error(message);
 };
@@ -170,6 +183,7 @@ export async function command(executable, args, options = {}) {
   return await new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       cwd: options.cwd ?? workspace,
+      env: { ...process.env, ...options.env },
       shell: false,
       windowsHide: true,
     });
@@ -188,6 +202,7 @@ export async function command(executable, args, options = {}) {
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
+    child.stdin.end(options.input ?? '');
     child.on('error', (error) => {
       clearTimeout(deadline);
       reject(error);
@@ -290,11 +305,13 @@ export const dockerRunArgs = (name, image) => [
   '/work/runner.cjs',
 ];
 
-export async function testDraft(directory) {
+export async function testDraft(directory, runtimeInput) {
   const sandbox = path.join(directory, 'sandbox');
   await mkdir(sandbox);
   await cp(path.join(directory, 'compiled'), path.join(sandbox, 'compiled'), { recursive: true });
   await cp(path.join(directory, 'cases.json'), path.join(sandbox, 'cases.json'));
+  if (runtimeInput !== undefined)
+    await writeFile(path.join(sandbox, 'input.json'), JSON.stringify(runtimeInput));
   for (const dependency of ['react', 'react-dom', 'scheduler']) {
     const filename =
       dependency === 'scheduler'
@@ -324,8 +341,10 @@ for (const item of cases) {
   assert.ok(!/<(?:script|iframe|object|embed|link|meta)\\b|\\son[a-z]+\\s*=|javascript:/i.test(markup));
   for (const value of Object.values(item.expected)) assert.ok(markup.includes(String(value)), 'Feature must display every expected result');
 }
-const preview = renderToStaticMarkup(React.createElement(Feature, {input: cases[0].input}));
-process.stdout.write(JSON.stringify({passed: cases.length, preview}));
+const input = ${runtimeInput !== undefined ? "require('./input.json')" : 'cases[0].input'};
+const result = evaluate(Object.freeze({...input}));
+const preview = renderToStaticMarkup(React.createElement(Feature, {input}));
+process.stdout.write(JSON.stringify(${runtimeInput !== undefined ? '{result, preview}' : '{passed: cases.length, preview}'}));
 `,
   );
   await writeFile(
@@ -341,9 +360,19 @@ process.stdout.write(JSON.stringify({passed: cases.length, preview}));
     const output = await command('docker', dockerRunArgs(container, image), { timeout: 20000 });
     const result = JSON.parse(output);
     if (
-      !exactKeys(result, ['passed', 'preview']) ||
-      result.passed !==
-        JSON.parse(await readFile(path.join(directory, 'cases.json'), 'utf8')).length ||
+      !exactKeys(
+        result,
+        runtimeInput !== undefined ? ['result', 'preview'] : ['passed', 'preview'],
+      ) ||
+      (runtimeInput === undefined &&
+        result.passed !==
+          JSON.parse(await readFile(path.join(directory, 'cases.json'), 'utf8')).length) ||
+      (runtimeInput !== undefined &&
+        (!plain(result.result) ||
+          Object.keys(result.result).length > 20 ||
+          Object.values(result.result).some(
+            (value) => typeof value !== 'number' || !Number.isFinite(value),
+          ))) ||
       typeof result.preview !== 'string' ||
       result.preview.length > 30000 ||
       /<(?:script|iframe|object|embed|link|meta)\b|\son[a-z]+\s*=|javascript:/i.test(result.preview)
