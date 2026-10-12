@@ -81,6 +81,12 @@
 .calculator-request details {
   margin: 16px 0;
 }
+.calculator-request > label + label {
+  margin-top: 18px;
+}
+.calculator-results strong {
+  overflow-wrap: anywhere;
+}
 .calculator-page summary {
   cursor: pointer;
   padding: 12px 0;

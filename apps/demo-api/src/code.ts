@@ -6,19 +6,16 @@ import path from 'node:path';
 import type { PrismaClient, Prisma, CodeProposal } from '@prisma/client';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { DemoSession, Permission } from '@evolvekit/core';
+import {
+  toolRecordSchema,
+  toolCasesSchema,
+  matchesToolContract,
+  type ToolRecord,
+} from '@evolvekit/core';
 import { EvolutionError, contentHash } from '@evolvekit/server';
 import { z } from 'zod';
 
-const numbers = z
-  .record(
-    z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,50}$/),
-    z.number().finite().min(-1e12).max(1e12),
-  )
-  .refine((v) => Object.keys(v).length > 0 && Object.keys(v).length <= 20);
-const casesSchema = z
-  .array(z.object({ input: numbers, expected: numbers }).strict())
-  .min(3)
-  .max(30);
+const casesSchema = toolCasesSchema;
 const createSchema = z
   .object({ request: z.string().trim().min(1).max(4000), cases: casesSchema })
   .strict();
@@ -48,8 +45,8 @@ export interface CodeEngine {
     draft: Draft,
     cases: Cases,
     request: string,
-    input: Record<string, number>,
-  ): Promise<{ result: Record<string, number>; preview: string }>;
+    input: ToolRecord,
+  ): Promise<{ result: ToolRecord; preview: string }>;
 }
 export function createCodeEngine(): CodeEngine {
   const load = async () =>
@@ -373,7 +370,7 @@ export async function registerCodeRoutes(
   app.post('/v1/code-evaluate', async (request) => {
     const identity = allow(request, 'code:read');
     const { proposalId, input } = z
-      .object({ proposalId: z.string().uuid().nullable(), input: numbers })
+      .object({ proposalId: z.string().uuid().nullable(), input: toolRecordSchema })
       .strict()
       .parse(request.body);
     const active = proposalId === null ? await pointer(identity) : null;
@@ -383,19 +380,24 @@ export async function registerCodeRoutes(
     verify(p);
     if (!['Ready', 'PendingApproval', 'Approved', 'Published'].includes(p.state))
       throw new EvolutionError(409, 'NOT_READY', 'Wait for this calculator to finish its checks.');
-    if (
-      Object.keys(input).sort().join() !==
-      Object.keys((p.cases as Cases)[0].input)
-        .sort()
-        .join()
-    )
+    if (!matchesToolContract(input, (p.cases as Cases)[0].input))
       throw new EvolutionError(422, 'INPUT_FIELDS', 'Fill in every calculator input.');
     if (evaluating)
       throw new EvolutionError(429, 'BUSY', 'A calculation is running. Try again shortly.');
     evaluating = true;
     try {
+      const evaluated = await engine.evaluate(
+        p.source as Draft,
+        p.cases as Cases,
+        p.request,
+        input,
+      );
+      const result = toolRecordSchema.parse(evaluated.result);
+      if (!matchesToolContract(result, (p.cases as Cases)[0].expected))
+        throw new Error('Output does not match the reviewed contract.');
       return {
-        ...(await engine.evaluate(p.source as Draft, p.cases as Cases, p.request, input)),
+        ...evaluated,
+        result,
         proposalId: id,
         generation: active?.generation ?? null,
       };

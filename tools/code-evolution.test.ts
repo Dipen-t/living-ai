@@ -94,6 +94,29 @@ describe('code evolution draft boundaries', () => {
       }),
     ).rejects.toThrow('incomplete');
   });
+  it('requests a typed decision contract and keeps numeric-only drafts compatible', async () => {
+    const decisionCases = [true, false, true].map((eligible) => ({
+      input: { tier: 'gold', eligible },
+      expected: { reason: 'Checked', eligible },
+    }));
+    let prompt = '';
+    await generateDraft('Check eligibility', decisionCases, {
+      apiKey: 'test',
+      fetch: async (_url, options) => {
+        prompt = options.body;
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(draft) }] } },
+            ],
+          }),
+        );
+      },
+    });
+    expect(prompt).toContain('number | string | boolean');
+    expect(validateCases(decisionCases)).toEqual(decisionCases);
+    expect(validateCases(cases)).toEqual(cases);
+  });
   it('uses network and filesystem isolation, resource bounds, and no host mounts or secrets', () => {
     const args = dockerRunArgs('draft-test', 'image-test');
     for (const flag of [

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DemoSession } from '@evolvekit/core';
+import type { DemoSession, ToolRecord } from '@evolvekit/core';
 import { createApi, request } from './api';
 import './calculators.css';
 
-type Case = { input: Record<string, number>; expected: Record<string, number> };
+type Case = { input: ToolRecord; expected: ToolRecord };
 type Proposal = {
   id: string;
   request: string;
@@ -53,7 +53,39 @@ const names: Record<string, string> = {
   daysLate: 'Days late',
   graceDays: 'Grace period (days)',
   dailyRatePercent: 'Daily rate (%)',
+  customerTier: 'Customer tier',
+  orderAmount: 'Order amount',
+  overdue: 'Overdue payment?',
+  eligible: 'Eligible for discount',
+  discountPercent: 'Discount (%)',
+  reason: 'Reason',
 };
+const decisionRequest =
+  'Build a discount eligibility tool. Inputs are customerTier (text), orderAmount (number), and overdue (yes/no). If overdue is true, return eligible false, discountPercent 0, and reason "Overdue payment". Otherwise a customer whose tier, ignoring case and surrounding spaces, is gold and whose order amount is at least 10000 gets eligible true, discountPercent 10, and reason "Gold customer discount". Everyone else gets eligible false, discountPercent 0, and reason "Standard pricing". Show the decision and explanation. This is a preview tool; do not change any orders.';
+const decisionCases: Case[] = [
+  {
+    input: { customerTier: 'gold', orderAmount: 10000, overdue: false },
+    expected: { eligible: true, discountPercent: 10, reason: 'Gold customer discount' },
+  },
+  {
+    input: { customerTier: 'gold', orderAmount: 20000, overdue: true },
+    expected: { eligible: false, discountPercent: 0, reason: 'Overdue payment' },
+  },
+  {
+    input: { customerTier: 'silver', orderAmount: 20000, overdue: false },
+    expected: { eligible: false, discountPercent: 0, reason: 'Standard pricing' },
+  },
+  {
+    input: { customerTier: 'gold', orderAmount: 9999, overdue: false },
+    expected: { eligible: false, discountPercent: 0, reason: 'Standard pricing' },
+  },
+  {
+    input: { customerTier: ' GOLD ', orderAmount: 15000, overdue: false },
+    expected: { eligible: true, discountPercent: 10, reason: 'Gold customer discount' },
+  },
+];
+const friendlyName = (name: string) =>
+  names[name] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ');
 const labels: Record<string, string> = {
   Queued: 'Waiting to start',
   Generating: 'Building and checking',
@@ -76,7 +108,7 @@ export function CalculatorsPage() {
     [mode, setMode] = useState<'preview' | 'active'>('preview');
   const [input, setInput] = useState<Record<string, string>>({}),
     [preview, setPreview] = useState(''),
-    [result, setResult] = useState<Record<string, number> | null>(null);
+    [result, setResult] = useState<ToolRecord | null>(null);
   const key = useRef<{ text: string; key: string } | null>(null),
     epoch = useRef(0);
   const refresh = async () => {
@@ -134,7 +166,8 @@ export function CalculatorsPage() {
         <div>
           <h1>Make room for a new idea.</h1>
           <p>
-            Build a calculator, try its results, and review it before adding it to your workspace.
+            Build a calculator or decision tool, try its results, and review it before adding it to
+            your workspace.
           </p>
         </div>
         <label>
@@ -160,19 +193,34 @@ export function CalculatorsPage() {
       )}
       <div className="calculator-modes">
         <button aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}>
-          Try a new calculator
+          Try a new tool
         </button>
         <button aria-pressed={mode === 'active'} onClick={() => setMode('active')}>
-          Your active calculator
+          Your active tool
         </button>
       </div>
       {mode === 'preview' && (
         <>
           {can('code:request') && (
             <section className="calculator-request">
-              <h2>What should it calculate?</h2>
+              <h2>What should your tool do?</h2>
               <label>
-                Your calculation rule
+                Start with an example
+                <select
+                  defaultValue="calculator"
+                  disabled={busy}
+                  onChange={(event) => {
+                    const decision = event.target.value === 'decision';
+                    setText(decision ? decisionRequest : defaultRequest);
+                    setCaseText(JSON.stringify(decision ? decisionCases : cases, null, 2));
+                  }}
+                >
+                  <option value="calculator">Late-payment calculator</option>
+                  <option value="decision">Discount eligibility</option>
+                </select>
+              </label>
+              <label>
+                Your tool idea
                 <textarea
                   rows={5}
                   value={text}
@@ -211,7 +259,7 @@ export function CalculatorsPage() {
                       key.current.key,
                     );
                     setSelected(p.id);
-                  }, 'Your calculator is being built. You can leave this page and return later.')
+                  }, 'Your tool is being built. You can leave this page and return later.')
                 }
               >
                 Build a preview
@@ -234,7 +282,7 @@ export function CalculatorsPage() {
       {proposal && (
         <section className="calculator-workbench">
           <header>
-            <h2>{mode === 'active' ? 'Your calculator' : 'Try this calculator'}</h2>
+            <h2>{mode === 'active' ? 'Your tool' : 'Try this tool'}</h2>
             <span>{labels[proposal.state]}</span>
           </header>
           <p>{proposal.summary ?? proposal.request}</p>
@@ -249,62 +297,101 @@ export function CalculatorsPage() {
               <div className="calculator-inputs">
                 {Object.entries(input).map(([name, value]) => (
                   <label key={name}>
-                    {names[name] ?? name}
-                    <input
-                      type="number"
-                      step="any"
-                      value={value}
-                      disabled={busy}
-                      onChange={(e) => {
-                        epoch.current++;
-                        setInput({ ...input, [name]: e.target.value });
-                        setPreview('');
-                        setResult(null);
-                        setChecked(false);
-                      }}
-                    />
+                    {friendlyName(name)}
+                    {typeof proposal.cases[0].input[name] === 'boolean' ? (
+                      <select
+                        value={value}
+                        disabled={busy}
+                        onChange={(event) => {
+                          epoch.current++;
+                          setInput({ ...input, [name]: event.target.value });
+                          setPreview('');
+                          setResult(null);
+                          setChecked(false);
+                        }}
+                      >
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                      </select>
+                    ) : (
+                      <input
+                        type={typeof proposal.cases[0].input[name] === 'number' ? 'number' : 'text'}
+                        maxLength={500}
+                        step="any"
+                        value={value}
+                        disabled={busy}
+                        onChange={(e) => {
+                          epoch.current++;
+                          setInput({ ...input, [name]: e.target.value });
+                          setPreview('');
+                          setResult(null);
+                          setChecked(false);
+                        }}
+                      />
+                    )}
                   </label>
                 ))}
               </div>
               <button
                 disabled={
                   busy ||
-                  Object.values(input).some((v) => v.trim() === '' || !Number.isFinite(Number(v)))
+                  Object.entries(input).some(
+                    ([key, value]) =>
+                      typeof proposal.cases[0].input[key] === 'number' &&
+                      (value.trim() === '' || !Number.isFinite(Number(value))),
+                  )
                 }
                 onClick={() =>
                   void act(async () => {
                     const current = epoch.current;
                     const value = await request<{
-                      result: Record<string, number>;
+                      result: ToolRecord;
                       preview: string;
                       proposalId: string;
                     }>('/v1/code-evaluate', {
                       proposalId: mode === 'active' ? null : proposal.id,
                       input: Object.fromEntries(
-                        Object.entries(input).map(([k, v]) => [k, Number(v)]),
+                        Object.entries(input).map(([k, v]) => [
+                          k,
+                          typeof proposal.cases[0].input[k] === 'number'
+                            ? Number(v)
+                            : typeof proposal.cases[0].input[k] === 'boolean'
+                              ? v === 'true'
+                              : v,
+                        ]),
                       ),
                     });
                     if (current !== epoch.current) return;
                     if (value.proposalId !== proposal.id)
-                      throw new Error(
-                        'The active calculator changed. Refresh and calculate again.',
-                      );
+                      throw new Error('The active tool changed. Refresh and try again.');
                     setPreview(value.preview);
                     setResult(value.result);
-                  }, 'Calculation finished.')
+                  }, 'Tool finished.')
                 }
               >
-                Calculate
+                Try these inputs
               </button>
               {result && (
                 <div className="calculator-results" aria-live="polite">
                   {Object.entries(result).map(([name, value]) => (
                     <p key={name}>
                       <span>
-                        {name === 'fee' ? 'Late fee' : name === 'total' ? 'Total amount' : name}
+                        {name === 'fee'
+                          ? 'Late fee'
+                          : name === 'total'
+                            ? 'Total amount'
+                            : friendlyName(name)}
                       </span>
                       <strong>
-                        {new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(value)}
+                        {typeof value === 'number'
+                          ? new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(
+                              value,
+                            )
+                          : typeof value === 'boolean'
+                            ? value
+                              ? 'Yes'
+                              : 'No'
+                            : value}
                       </strong>
                     </p>
                   ))}
@@ -312,7 +399,7 @@ export function CalculatorsPage() {
               )}
               {preview && (
                 <iframe
-                  title="Generated calculator result"
+                  title="Generated tool result"
                   className="calculator-frame"
                   sandbox=""
                   srcDoc={
@@ -325,8 +412,8 @@ export function CalculatorsPage() {
               <p className="calculator-note">
                 {mode === 'preview'
                   ? String(proposal.report?.passed ?? 0) +
-                    ' examples passed. Preview calculations do not change your workspace.'
-                  : 'This calculator runs the exact approved source in isolation.'}
+                    ' examples passed. Preview runs do not change your workspace.'
+                  : 'This tool runs the exact approved source in isolation.'}
               </p>
               <details className="calculator-source">
                 <summary>Review the generated source</summary>
@@ -362,7 +449,7 @@ export function CalculatorsPage() {
                       checked={checked}
                       onChange={(e) => setChecked(e.target.checked)}
                     />{' '}
-                    I’ve tried the calculator and checked the results
+                    I’ve tried the tool and checked the results
                   </label>
                   <button
                     disabled={busy || !checked || !result}
@@ -410,11 +497,11 @@ export function CalculatorsPage() {
                           ...action(),
                           expectedGeneration: data!.active.generation,
                         }),
-                      'Calculator activated in this demo workspace.',
+                      'Tool activated in this demo workspace.',
                     )
                   }
                 >
-                  Activate calculator
+                  Activate tool
                 </button>
               )}
             </>
@@ -423,15 +510,15 @@ export function CalculatorsPage() {
       )}
       {mode === 'active' && !proposal && (
         <p className="calculator-empty">
-          No calculator is active yet. Try a draft and have its source approved first.
+          No tool is active yet. Try a draft and have its source approved first.
         </p>
       )}
       {mode === 'active' && data?.releases[0] && can('code:rollback') && (
         <section className="calculator-restore">
           <h2>Restore the previous version</h2>
           <p>
-            Switch back to the calculator used before the latest change. Saved drafts and review
-            history stay available.
+            Switch back to the tool used before the latest change. Saved drafts and review history
+            stay available.
           </p>
           <button
             disabled={busy}
@@ -442,7 +529,7 @@ export function CalculatorsPage() {
                     releaseId: data.releases[0].id,
                     expectedGeneration: data.active.generation,
                   }),
-                'Previous calculator restored.',
+                'Previous tool restored.',
               )
             }
           >

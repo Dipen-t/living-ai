@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { registry, legacyRegistry } from '../../../apps/demo-erp/src/fixtures';
-import { createDemoApi } from '../../../apps/demo-api/src/app';
+import { createDemoApi, demoAccounts } from '../../../apps/demo-api/src/app';
 import {
   EvolutionService,
   contentHash,
@@ -136,6 +136,151 @@ const enqueue = (
   });
 const localPlanner = new LocalRulesPlanner();
 describe('Durable proposal planning', () => {
+  it('preserves decision types and explanations through preview, activation, and rollback', async () => {
+    const cases = [false, true, false].map((overdue) => ({
+      input: { tier: 'gold', amount: 12000, overdue },
+      expected: {
+        eligible: !overdue,
+        reason: overdue ? 'Overdue payment' : 'Gold discount',
+        discount: overdue ? 0 : 10,
+      },
+    }));
+    const draft = {
+      featureId: 'discount-rule',
+      summary: 'Discount decision',
+      files: {
+        'logic.ts':
+          'export function evaluate(input: Record<string, number | string | boolean>) { return { eligible: input.overdue === false, reason: input.overdue ? "Overdue payment" : "Gold discount", discount: input.overdue ? 0 : 10 }; }',
+        'Feature.tsx':
+          'import React from "react"; export function Feature() { return <div>Discount decision</div>; }',
+      },
+    };
+    let invalidOutput = false;
+    const demo = await createDemoApi({
+      databaseUrl: url.href,
+      runWorker: true,
+      codeEngine: {
+        async baseCommit() {
+          return 'a'.repeat(40);
+        },
+        async generate() {
+          return { draft, report: { passed: 3, preview: '<div>Discount decision</div>' } };
+        },
+        async evaluate(_draft, _cases, _request, input) {
+          return {
+            result: {
+              eligible: invalidOutput ? 'yes' : !input.overdue,
+              reason: input.overdue ? 'Overdue payment' : 'Gold discount',
+              discount: input.overdue ? 0 : 10,
+            },
+            preview: '<div>Discount decision</div>',
+          };
+        },
+      },
+    });
+    const origin = 'http://127.0.0.1:5173';
+    const post = (cookie: string, route: string, payload: unknown) =>
+      demo.app.inject({
+        method: 'POST',
+        url: route,
+        headers: {
+          cookie,
+          origin,
+          'content-type': 'application/json',
+          'idempotency-key': randomUUID(),
+        },
+        payload: JSON.stringify(payload),
+      });
+    const login = async (account: string) =>
+      String((await post('', '/demo/session', { account })).headers['set-cookie']).split(';')[0];
+    const requesterScope = demoAccounts.requester.principal;
+    const reviewerScope = demoAccounts.approver.principal;
+    try {
+      await demo.db.tenant.create({
+        data: { applicationId: 'demo-erp', id: 'decision-org', name: 'Decision test' },
+      });
+      demoAccounts.requester.principal = { ...requesterScope, tenantId: 'decision-org' };
+      demoAccounts.approver.principal = { ...reviewerScope, tenantId: 'decision-org' };
+      const maya = await login('requester'),
+        arun = await login('approver');
+      const inconsistent = structuredClone(cases);
+      (inconsistent[1].input as Record<string, unknown>).overdue = 'false';
+      expect(
+        (await post(maya, '/v1/code-proposals', { request: 'Discount', cases: inconsistent }))
+          .statusCode,
+      ).toBe(422);
+      const created = await post(maya, '/v1/code-proposals', { request: 'Discount', cases });
+      expect(created.statusCode).toBe(202);
+      const id = created.json().id;
+      let proposal: any;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        proposal = await demo.db.codeProposal.findUnique({ where: { id } });
+        if (proposal?.state === 'Ready') break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(proposal.state).toBe('Ready');
+      const input = { tier: 'gold', amount: 15000, overdue: false };
+      expect(
+        (
+          await post(maya, '/v1/code-evaluate', {
+            proposalId: id,
+            input: { ...input, overdue: 'false' },
+          })
+        ).statusCode,
+      ).toBe(422);
+      const preview = await post(maya, '/v1/code-evaluate', { proposalId: id, input });
+      expect(preview.json().result).toEqual({
+        eligible: true,
+        reason: 'Gold discount',
+        discount: 10,
+      });
+      invalidOutput = true;
+      expect((await post(maya, '/v1/code-evaluate', { proposalId: id, input })).statusCode).toBe(
+        422,
+      );
+      invalidOutput = false;
+      const action = () => ({
+        contentHash: proposal.contentHash,
+        expectedVersion: proposal.lockVersion,
+      });
+      expect((await post(maya, `/v1/code-proposals/${id}/submit`, action())).statusCode).toBe(200);
+      proposal = await demo.db.codeProposal.findUnique({ where: { id } });
+      expect((await post(arun, `/v1/code-proposals/${id}/approve`, action())).statusCode).toBe(200);
+      proposal = await demo.db.codeProposal.findUnique({ where: { id } });
+      expect(
+        (
+          await post(arun, `/v1/code-proposals/${id}/activate`, {
+            ...action(),
+            expectedGeneration: 0,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (await post(maya, '/v1/code-evaluate', { proposalId: null, input })).json().result,
+      ).toEqual(preview.json().result);
+      expect(
+        (
+          await post(maya, '/v1/code-evaluate', {
+            proposalId: null,
+            input: { ...input, overdue: true },
+          })
+        ).json().result,
+      ).toEqual({ eligible: false, reason: 'Overdue payment', discount: 0 });
+      const release = await demo.db.codeRelease.findFirst({ where: { proposalId: id } });
+      expect(
+        (await post(arun, '/v1/code-rollback', { releaseId: release!.id, expectedGeneration: 1 }))
+          .statusCode,
+      ).toBe(200);
+      expect((await post(maya, '/v1/code-evaluate', { proposalId: null, input })).statusCode).toBe(
+        409,
+      );
+      expect(await demo.db.codeProposal.findUnique({ where: { id } })).not.toBeNull();
+    } finally {
+      demoAccounts.requester.principal = requesterScope;
+      demoAccounts.approver.principal = reviewerScope;
+      await demo.app.close();
+    }
+  });
   it('persists exact-source code reviews, isolates scopes, rejects conflicting activation and rolls back without deleting drafts', async () => {
     const cases = [1, 2, 3].map((amount) => ({
       input: { amount },
@@ -163,11 +308,11 @@ describe('Durable proposal planning', () => {
         _draft: unknown,
         _cases: unknown,
         _request: string,
-        input: Record<string, number>,
+        input: Record<string, number | string | boolean>,
       ) {
         return {
-          result: { total: input.amount * 2 },
-          preview: '<div>' + input.amount * 2 + '</div>',
+          result: { total: Number(input.amount) * 2 },
+          preview: '<div>' + Number(input.amount) * 2 + '</div>',
         };
       },
     };

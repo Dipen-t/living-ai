@@ -1,5 +1,6 @@
 import { z } from 'zod';
 export type * from './lifecycle';
+export * from './generated-tools';
 
 const id = z
   .string()

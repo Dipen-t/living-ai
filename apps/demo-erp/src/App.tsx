@@ -106,7 +106,7 @@ export default function App() {
           aria-current={pageId === 'calculators' ? 'page' : undefined}
           onClick={() => setPageId('calculators')}
         >
-          Calculators
+          Business tools
         </button>
         {['customers', 'orders'].map((id) => (
           <button
