@@ -1,0 +1,62 @@
+[
+  {
+    "input": {
+      "amount": 1000,
+      "daysLate": 10,
+      "graceDays": 7,
+      "dailyRatePercent": 0.1
+    },
+    "expected": {
+      "fee": 3,
+      "total": 1003
+    }
+  },
+  {
+    "input": {
+      "amount": 2000,
+      "daysLate": 7,
+      "graceDays": 7,
+      "dailyRatePercent": 0.1
+    },
+    "expected": {
+      "fee": 0,
+      "total": 2000
+    }
+  },
+  {
+    "input": {
+      "amount": 1250,
+      "daysLate": 9,
+      "graceDays": 2,
+      "dailyRatePercent": 0.2
+    },
+    "expected": {
+      "fee": 17.5,
+      "total": 1267.5
+    }
+  },
+  {
+    "input": {
+      "amount": 0,
+      "daysLate": 30,
+      "graceDays": 7,
+      "dailyRatePercent": 0.1
+    },
+    "expected": {
+      "fee": 0,
+      "total": 0
+    }
+  },
+  {
+    "input": {
+      "amount": 1000,
+      "daysLate": -2,
+      "graceDays": 7,
+      "dailyRatePercent": 0.1
+    },
+    "expected": {
+      "fee": 0,
+      "total": 1000
+    }
+  }
+]

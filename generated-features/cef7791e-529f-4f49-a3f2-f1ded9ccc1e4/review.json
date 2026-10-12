@@ -1,0 +1,6 @@
+{
+  "proposalId": "cef7791e-529f-4f49-a3f2-f1ded9ccc1e4",
+  "contentHash": "7fa530e505e5b276023736e447a1297d9795a6661a3268fd14715626290393ab",
+  "baseCommit": "bbdd741a6200d6ce9890336bea4c12de6cd420b6",
+  "summary": "Calculates late payment fees based on original amount, days late, a grace period, and a daily percentage rate. Fees are only applied for days exceeding the grace period and are rounded to two decimal places."
+}
