@@ -1,0 +1,34 @@
+{
+  "name": "evolvekit",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "evolve:code": "node --env-file=.env tools/code-evolution.mjs",
+    "evolve:preview": "node tools/code-evolution-preview.mjs",
+    "dev": "pnpm --filter @evolvekit/demo-erp dev",
+    "dev:api": "pnpm --filter @evolvekit/demo-api dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run --exclude packages/server/src/integration.test.ts",
+    "test:integration": "vitest run packages/server/src/integration.test.ts",
+    "db:up": "docker compose -f docker/compose.yaml up -d --wait",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "format": "prettier --write \"packages/**/src/**/*.{ts,tsx}\" \"apps/**/src/**/*.{ts,tsx,css}\" \"packages/*/package.json\" \"apps/*/package.json\" package.json"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.6",
+    "typescript": "5.9.3",
+    "turbo": "2.5.8",
+    "tsup": "8.5.0",
+    "vitest": "3.2.4",
+    "vite": "7.1.9",
+    "prisma": "6.19.0",
+    "@prisma/client": "6.19.0",
+    "prettier": "3.6.2"
+  }
+}

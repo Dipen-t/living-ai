@@ -1,0 +1,243 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+model Application {
+  id String @id
+  name String
+  registryVersionId String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model Tenant {
+  applicationId String
+  id String
+  name String
+  @@id([applicationId, id])
+}
+
+model FollowUpCustomer {
+  applicationId String
+  tenantId String
+  id String
+  name String @db.VarChar(120)
+  company String @db.VarChar(120)
+  followUps FollowUp[]
+  @@id([applicationId, tenantId, id])
+}
+
+model FollowUp {
+  id String @id
+  applicationId String
+  tenantId String
+  customerId String
+  title String @db.VarChar(200)
+  ownerId String
+  dueDate DateTime @db.Date
+  status String @default("pending")
+  createdBy String
+  completedBy String?
+  completedAt DateTime? @db.Timestamptz(3)
+  lockVersion Int @default(0)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  customer FollowUpCustomer @relation(fields: [applicationId, tenantId, customerId], references: [applicationId, tenantId, id], onDelete: Restrict)
+  @@index([applicationId, tenantId, ownerId, status, dueDate])
+}
+
+model RegistryVersion {
+  id String @id
+  applicationId String
+  versionLabel String
+  content Json
+  contentHash String
+  installedBy String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, versionLabel])
+  @@unique([applicationId, id])
+}
+
+model EvolutionRequest {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  requesterId String
+  text String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, tenantId, pageId, id])
+  @@index([applicationId, tenantId, createdAt])
+}
+
+model Proposal {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  requestId String @unique
+  currentRevisionId String?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, tenantId, pageId, id])
+  @@index([applicationId, tenantId, createdAt])
+}
+
+model ProposalRevision {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  proposalId String
+  revisionNumber Int
+  parentRevisionId String?
+  registryVersionId String
+  baseVersionId String
+  baseGeneration BigInt
+  operations Json
+  configuration Json
+  configurationHash String
+  refinementText String
+  createdBy String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([proposalId, revisionNumber])
+  @@unique([applicationId, tenantId, pageId, id])
+  @@unique([applicationId, tenantId, pageId, proposalId, id])
+}
+
+model RevisionLifecycle {
+  revisionId String @id
+  applicationId String
+  tenantId String
+  pageId String
+  state String
+  lockVersion Int @default(0)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+}
+
+model ValidationRun {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  revisionId String
+  phase String
+  validatorVersion String
+  configurationHash String
+  result String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model Approval {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  revisionId String @unique
+  decision String
+  configurationHash String
+  actorId String
+  reason String?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, tenantId, pageId, id])
+}
+
+model ConfigurationVersion {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  registryVersionId String
+  parentVersionId String?
+  sourceRevisionId String? @unique
+  configuration Json
+  configurationHash String
+  createdBy String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, tenantId, pageId, id])
+  @@index([applicationId, tenantId, pageId, createdAt])
+}
+
+model ActiveConfiguration {
+  applicationId String
+  tenantId String
+  pageId String
+  versionId String
+  generation BigInt
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  @@id([applicationId, tenantId, pageId])
+}
+
+model ActivationEvent {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  generation BigInt
+  previousVersionId String?
+  versionId String
+  kind String
+  approvalId String?
+  actorId String
+  reason String?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, tenantId, pageId, generation])
+}
+
+model AuditEvent {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String?
+  actorId String
+  eventType String
+  resourceId String?
+  correlationId String
+  metadata Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@index([applicationId, tenantId, createdAt])
+}
+
+model IdempotencyKey {
+  applicationId String
+  tenantId String
+  actorId String
+  routeKey String
+  key String
+  requestHash String
+  response Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@id([applicationId, tenantId, actorId, routeKey, key])
+}
+
+model PlannerJob {
+  id String @id
+  applicationId String
+  tenantId String
+  pageId String
+  requestId String
+  proposalId String
+  parentRevisionId String?
+  expectedLockVersion Int?
+  requesterId String
+  correlationId String
+  registryVersionId String
+  baseVersionId String
+  baseGeneration BigInt
+  input Json
+  status String @default("Queued")
+  attempts Int @default(0)
+  leaseToken String?
+  leaseUntil DateTime? @db.Timestamptz(3)
+  availableAt DateTime @default(now()) @db.Timestamptz(3)
+  resultCode String?
+  message String?
+  revisionId String? @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+  @@index([status, availableAt, leaseUntil])
+  @@index([applicationId, tenantId, requesterId, createdAt])
+}

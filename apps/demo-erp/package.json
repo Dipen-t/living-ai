@@ -1,0 +1,23 @@
+{
+  "name": "@evolvekit/demo-erp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@evolvekit/core": "workspace:*",
+    "@evolvekit/react": "workspace:*",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "vite": "7.1.9",
+    "@vitejs/plugin-react": "5.0.4",
+    "@types/react": "19.1.16",
+    "@types/react-dom": "19.1.9"
+  }
+}

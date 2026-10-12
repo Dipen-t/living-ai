@@ -1,0 +1,21 @@
+{
+  "name": "@evolvekit/demo-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/main.ts",
+    "build": "tsup src/main.ts --format esm --external @prisma/client",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@evolvekit/core": "workspace:*",
+    "@evolvekit/ai": "workspace:*",
+    "@evolvekit/server": "workspace:*",
+    "@prisma/client": "6.19.0",
+    "@fastify/cookie": "11.0.2",
+    "fastify": "5.6.1",
+    "tsx": "4.20.6",
+    "zod": "4.1.12"
+  }
+}

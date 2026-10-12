@@ -1,0 +1,19 @@
+name: evolvekit
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    ports:
+      - '127.0.0.1:54329:5432'
+    environment:
+      POSTGRES_DB: evolvekit
+      POSTGRES_USER: evolvekit
+      POSTGRES_PASSWORD: evolvekit_local_only
+    volumes:
+      - evolvekit-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U evolvekit -d evolvekit']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  evolvekit-postgres:
