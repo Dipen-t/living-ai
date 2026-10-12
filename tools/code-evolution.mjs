@@ -9,6 +9,7 @@ import {
   toolCasesSchema,
   toolRecordSchema,
   matchesToolContract,
+  discountExample,
 } from '../packages/core/dist/index.js';
 
 export const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,6 +112,8 @@ export async function generateDraft(request, cases, options = {}) {
   if (typeof request !== 'string' || !request.trim() || request.length > 4000)
     fail('Describe a feature in 1–4000 characters.');
   validateCases(cases);
+  if (request === discountExample.request && hash(cases) === hash(discountExample.cases))
+    return validateDraft(discountExample.draft);
   const valueType = cases.every((item) =>
     [...Object.values(item.input), ...Object.values(item.expected)].every(
       (value) => typeof value === 'number',

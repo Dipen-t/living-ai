@@ -155,7 +155,8 @@ describe('Durable proposal planning', () => {
           'import React from "react"; export function Feature() { return <div>Discount decision</div>; }',
       },
     };
-    let invalidOutput = false;
+    let invalidOutput = false,
+      quotaLimited = false;
     const demo = await createDemoApi({
       databaseUrl: url.href,
       runWorker: true,
@@ -164,6 +165,7 @@ describe('Durable proposal planning', () => {
           return 'a'.repeat(40);
         },
         async generate() {
+          if (quotaLimited) throw new Error('Generation failed (HTTP 429).');
           return { draft, report: { passed: 3, preview: '<div>Discount decision</div>' } };
         },
         async evaluate(_draft, _cases, _request, input) {
@@ -275,6 +277,21 @@ describe('Durable proposal planning', () => {
         409,
       );
       expect(await demo.db.codeProposal.findUnique({ where: { id } })).not.toBeNull();
+      quotaLimited = true;
+      const limited = await post(maya, '/v1/code-proposals', {
+        request: 'Synthetic quota test',
+        cases,
+      });
+      expect(limited.statusCode).toBe(202);
+      let failure: any;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        failure = await demo.db.codeProposal.findUnique({ where: { id: limited.json().id } });
+        if (failure?.state === 'Failed') break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(failure.state).toBe('Failed');
+      expect(failure.error).toContain('usage limit');
+      expect(failure.error).toContain('free built-in');
     } finally {
       demoAccounts.requester.principal = requesterScope;
       demoAccounts.approver.principal = reviewerScope;

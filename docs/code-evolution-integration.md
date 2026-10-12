@@ -2,7 +2,9 @@
 
 Open **Business tools** in the local demo. Maya can describe a calculator or decision tool, supply independent expected results, build a preview, try inputs, inspect source, and send it for review. Arun can approve the exact source and activate it. Restore the previous tool from the active view. The first restoration returns to an empty tool slot; all proposals, approvals, and release records remain stored.
 
-Choose **Discount eligibility** as the starter example. It accepts a customer tier, order amount, and overdue-payment flag and generates a decision, discount percentage, and explanation. Overdue payment blocks the discount; otherwise a gold customer with an order of at least 10,000 gets ten percent. Cases cover priority, the threshold, other tiers, and case/space normalization. These are generated preview rules, not order mutations.
+Choose **Discount eligibility · free built-in example** to try a fixed, host-authored decision tool without an AI call. It accepts a customer tier, order amount, and overdue-payment flag and returns a decision, discount percentage, and explanation. Overdue payment blocks the discount; otherwise a gold customer with an order of at least 10,000 gets ten percent. Cases cover priority, the threshold, other tiers, and case/space normalization. Only the exact bundled request and cases use this free source; custom or changed rules use Gemini. The example still passes compilation, Docker checks, source review, approval, and rollback. It does not change orders.
+
+Gemini HTTP 429 responses show a usage-limit message with the free example as an alternative. Retrying a failed draft creates a new request key; duplicate clicks while a request is pending retain idempotency. A live synthetic custom decision request returned HTTP 429 during verification, so provider availability remains a separate limitation from the implemented typed execution path.
 
 ## Request to local activation
 

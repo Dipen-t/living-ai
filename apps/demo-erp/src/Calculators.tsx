@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DemoSession, ToolRecord } from '@evolvekit/core';
+import { discountExample } from '@evolvekit/core';
 import { createApi, request } from './api';
 import './calculators.css';
 
@@ -60,30 +61,8 @@ const names: Record<string, string> = {
   discountPercent: 'Discount (%)',
   reason: 'Reason',
 };
-const decisionRequest =
-  'Build a discount eligibility tool. Inputs are customerTier (text), orderAmount (number), and overdue (yes/no). If overdue is true, return eligible false, discountPercent 0, and reason "Overdue payment". Otherwise a customer whose tier, ignoring case and surrounding spaces, is gold and whose order amount is at least 10000 gets eligible true, discountPercent 10, and reason "Gold customer discount". Everyone else gets eligible false, discountPercent 0, and reason "Standard pricing". Show the decision and explanation. This is a preview tool; do not change any orders.';
-const decisionCases: Case[] = [
-  {
-    input: { customerTier: 'gold', orderAmount: 10000, overdue: false },
-    expected: { eligible: true, discountPercent: 10, reason: 'Gold customer discount' },
-  },
-  {
-    input: { customerTier: 'gold', orderAmount: 20000, overdue: true },
-    expected: { eligible: false, discountPercent: 0, reason: 'Overdue payment' },
-  },
-  {
-    input: { customerTier: 'silver', orderAmount: 20000, overdue: false },
-    expected: { eligible: false, discountPercent: 0, reason: 'Standard pricing' },
-  },
-  {
-    input: { customerTier: 'gold', orderAmount: 9999, overdue: false },
-    expected: { eligible: false, discountPercent: 0, reason: 'Standard pricing' },
-  },
-  {
-    input: { customerTier: ' GOLD ', orderAmount: 15000, overdue: false },
-    expected: { eligible: true, discountPercent: 10, reason: 'Gold customer discount' },
-  },
-];
+const decisionRequest = discountExample.request;
+const decisionCases: Case[] = discountExample.cases;
 const friendlyName = (name: string) =>
   names[name] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ');
 const labels: Record<string, string> = {
@@ -216,9 +195,13 @@ export function CalculatorsPage() {
                   }}
                 >
                   <option value="calculator">Late-payment calculator</option>
-                  <option value="decision">Discount eligibility</option>
+                  <option value="decision">Discount eligibility · free built-in example</option>
                 </select>
               </label>
+              <p className="calculator-note">
+                The built-in discount example works without AI. Custom ideas and changed rules use
+                Gemini.
+              </p>
               <label>
                 Your tool idea
                 <textarea
@@ -251,6 +234,7 @@ export function CalculatorsPage() {
                   void act(async () => {
                     const parsed = JSON.parse(caseText),
                       fingerprint = JSON.stringify({ text, parsed });
+                    if (proposal?.state === 'Failed') key.current = null;
                     if (key.current?.text !== fingerprint)
                       key.current = { text: fingerprint, key: crypto.randomUUID() };
                     const p = await request<Proposal>(

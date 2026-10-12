@@ -467,13 +467,15 @@ export async function registerCodeRoutes(
             },
           });
       });
-    } catch {
+    } catch (error) {
       await db.codeProposal.updateMany({
         where: { id: p.id, state: 'Generating', lockVersion: p.lockVersion + 1 },
         data: {
           state: 'Failed',
           error:
-            'We couldn’t build a checked calculator. Check the assistant and Docker, then start a new request.',
+            error instanceof Error && error.message === 'Generation failed (HTTP 429).'
+              ? 'The AI assistant reached a usage limit. Try again later, or choose the free built-in discount example.'
+              : 'We couldn’t build a checked tool. Check the assistant and Docker, then start a new request.',
           leaseUntil: null,
           lockVersion: { increment: 1 },
         },
