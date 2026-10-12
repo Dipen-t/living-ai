@@ -16,7 +16,7 @@ export class ApiError extends Error {
     super(message);
   }
 }
-async function request<T>(path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
+export async function request<T>(path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
   const response = await fetch(`/api${path}`, {
     credentials: 'same-origin',
     method: body === undefined ? 'GET' : 'POST',

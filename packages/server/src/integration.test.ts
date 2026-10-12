@@ -136,6 +136,249 @@ const enqueue = (
   });
 const localPlanner = new LocalRulesPlanner();
 describe('Durable proposal planning', () => {
+  it('persists exact-source code reviews, isolates scopes, rejects conflicting activation and rolls back without deleting drafts', async () => {
+    const cases = [1, 2, 3].map((amount) => ({
+      input: { amount },
+      expected: { total: amount * 2 },
+    }));
+    const draft = {
+      featureId: 'double-amount',
+      summary: 'Double the amount',
+      files: {
+        'logic.ts':
+          'export function evaluate(input: Record<string, number>) { return { total: input.amount * 2 }; }',
+        'Feature.tsx':
+          'import React from "react"; import {evaluate} from "./logic"; export function Feature({input}: {input: Record<string, number>}) { return <div>{evaluate(input).total}</div>; }',
+      },
+    };
+    let baseCommit = 'a'.repeat(40);
+    const engine = {
+      async baseCommit() {
+        return baseCommit;
+      },
+      async generate() {
+        return { draft, report: { passed: 3, preview: '<div>2</div>' } };
+      },
+      async evaluate(
+        _draft: unknown,
+        _cases: unknown,
+        _request: string,
+        input: Record<string, number>,
+      ) {
+        return {
+          result: { total: input.amount * 2 },
+          preview: '<div>' + input.amount * 2 + '</div>',
+        };
+      },
+    };
+    let demo = await createDemoApi({ databaseUrl: url.href, codeEngine: engine, runWorker: true });
+    const origin = 'http://127.0.0.1:5173';
+    const login = async (account: string) => {
+      const response = await demo.app.inject({
+        method: 'POST',
+        url: '/demo/session',
+        headers: { origin },
+        payload: { account },
+      });
+      return String(response.headers['set-cookie']).split(';')[0];
+    };
+    const maya = await login('requester'),
+      arun = await login('approver');
+    const post = (cookie: string, route: string, payload: unknown, key = randomUUID()) =>
+      demo.app.inject({
+        method: 'POST',
+        url: route,
+        headers: { cookie, origin, 'idempotency-key': key, 'content-type': 'application/json' },
+        payload: JSON.stringify(payload),
+      });
+    const listing = async (cookie = maya) =>
+      (
+        await demo.app.inject({ method: 'GET', url: '/v1/code-proposals', headers: { cookie } })
+      ).json();
+    try {
+      expect((await demo.app.inject({ method: 'GET', url: '/v1/code-proposals' })).statusCode).toBe(
+        401,
+      );
+      expect(
+        (await post(arun, '/v1/code-proposals', { request: 'Double amount', cases })).statusCode,
+      ).toBe(403);
+      const key = randomUUID();
+      const created = await post(
+        maya,
+        '/v1/code-proposals',
+        { request: 'Double amount', cases },
+        key,
+      );
+      expect(created.statusCode).toBe(202);
+      const first = created.json();
+      expect(
+        (await post(maya, '/v1/code-proposals', { request: 'Double amount', cases }, key)).json()
+          .id,
+      ).toBe(first.id);
+      expect(
+        (await post(maya, '/v1/code-proposals', { request: 'Different', cases }, key)).statusCode,
+      ).toBe(409);
+      const second = (
+        await post(maya, '/v1/code-proposals', { request: 'Double amount again', cases })
+      ).json();
+      let rows: any[] = [];
+      for (let n = 0; n < 160; n++) {
+        rows = (await listing()).proposals;
+        if (
+          [first.id, second.id].every((id) => rows.some((p) => p.id === id && p.state === 'Ready'))
+        )
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const ready = rows.filter((p) => [first.id, second.id].includes(p.id));
+      expect(ready).toHaveLength(2);
+      expect(ready.every((p) => p.state === 'Ready')).toBe(true);
+      const p = ready[0];
+      expect(
+        (await post(maya, '/v1/code-evaluate', { proposalId: p.id, input: { amount: 7 } })).json()
+          .result,
+      ).toEqual({ total: 14 });
+      expect(
+        (await post(maya, '/v1/code-evaluate', { proposalId: p.id, input: { wrong: 7 } }))
+          .statusCode,
+      ).toBe(422);
+      expect(
+        (
+          await post(maya, '/v1/code-proposals/' + p.id + '/approve', {
+            contentHash: p.contentHash,
+            expectedVersion: p.lockVersion,
+          })
+        ).statusCode,
+      ).toBe(403);
+      await expect(
+        demo.db.codeProposal.update({ where: { id: p.id }, data: { source: { changed: true } } }),
+      ).rejects.toThrow();
+      const foreignId = randomUUID();
+      await demo.db.codeProposal.create({
+        data: {
+          id: foreignId,
+          applicationId: 'integration-app',
+          tenantId: 'foreign',
+          requesterId: 'foreign',
+          request: 'foreign',
+          cases,
+          state: 'Ready',
+          baseGeneration: 0,
+          baseCommit,
+          source: draft,
+          contentHash: contentHash({ draft, cases, request: 'foreign' }),
+          summary: draft.summary,
+          report: { passed: 3 },
+        },
+      });
+      expect((await listing()).proposals.some((p: any) => p.id === foreignId)).toBe(false);
+      expect(
+        (
+          await post(arun, '/v1/code-proposals/' + foreignId + '/approve', {
+            contentHash: p.contentHash,
+            expectedVersion: 0,
+          })
+        ).statusCode,
+      ).toBe(404);
+      const approved: any[] = [];
+      for (const proposal of ready) {
+        const submitted = await post(maya, '/v1/code-proposals/' + proposal.id + '/submit', {
+          contentHash: proposal.contentHash,
+          expectedVersion: proposal.lockVersion,
+        });
+        expect(submitted.statusCode).toBe(200);
+        expect(
+          (
+            await post(arun, '/v1/code-proposals/' + proposal.id + '/approve', {
+              contentHash: '0'.repeat(64),
+              expectedVersion: submitted.json().lockVersion,
+            })
+          ).statusCode,
+        ).toBe(409);
+        const review = await post(arun, '/v1/code-proposals/' + proposal.id + '/approve', {
+          contentHash: proposal.contentHash,
+          expectedVersion: submitted.json().lockVersion,
+        });
+        expect(review.statusCode).toBe(200);
+        approved.push(review.json());
+      }
+      baseCommit = 'b'.repeat(40);
+      expect(
+        (
+          await post(arun, '/v1/code-proposals/' + approved[0].id + '/activate', {
+            contentHash: approved[0].contentHash,
+            expectedVersion: approved[0].lockVersion,
+            expectedGeneration: 0,
+          })
+        ).statusCode,
+      ).toBe(409);
+      baseCommit = 'a'.repeat(40);
+      expect(
+        (
+          await post(maya, '/v1/code-proposals/' + approved[0].id + '/activate', {
+            contentHash: approved[0].contentHash,
+            expectedVersion: approved[0].lockVersion,
+            expectedGeneration: 0,
+          })
+        ).statusCode,
+      ).toBe(403);
+      const publications = await Promise.all(
+        approved.map((p) =>
+          post(arun, '/v1/code-proposals/' + p.id + '/activate', {
+            contentHash: p.contentHash,
+            expectedVersion: p.lockVersion,
+            expectedGeneration: 0,
+          }),
+        ),
+      );
+      expect(publications.map((p) => p.statusCode).sort()).toEqual([200, 409]);
+      const live = (await listing()).active;
+      expect(live.generation).toBe(1);
+      expect(
+        (await post(maya, '/v1/code-evaluate', { proposalId: null, input: { amount: 7 } })).json(),
+      ).toMatchObject({ result: { total: 14 }, proposalId: live.proposalId, generation: 1 });
+      const release = (await listing()).releases[0];
+      await expect(
+        demo.db.codeApproval.update({
+          where: { proposalId: live.proposalId },
+          data: { contentHash: '0'.repeat(64) },
+        }),
+      ).rejects.toThrow();
+      expect(
+        (await post(maya, '/v1/code-rollback', { releaseId: release.id, expectedGeneration: 1 }))
+          .statusCode,
+      ).toBe(403);
+      expect(
+        (await post(arun, '/v1/code-rollback', { releaseId: release.id, expectedGeneration: 0 }))
+          .statusCode,
+      ).toBe(409);
+      expect(
+        (
+          await post(arun, '/v1/code-rollback', { releaseId: release.id, expectedGeneration: 1 })
+        ).json(),
+      ).toMatchObject({ proposalId: null, generation: 2 });
+      expect(
+        (await post(maya, '/v1/code-evaluate', { proposalId: null, input: { amount: 7 } }))
+          .statusCode,
+      ).toBe(409);
+      await demo.app.close();
+      demo = await createDemoApi({ databaseUrl: url.href, codeEngine: engine, runWorker: false });
+      const after = (
+        await demo.app.inject({
+          method: 'GET',
+          url: '/v1/code-proposals',
+          headers: { cookie: await login('requester') },
+        })
+      ).json();
+      expect(after.active).toMatchObject({ proposalId: null, generation: 2 });
+      expect(after.proposals.filter((p: any) => [first.id, second.id].includes(p.id))).toHaveLength(
+        2,
+      );
+      expect(after.releases).toHaveLength(2);
+    } finally {
+      await demo.app.close();
+    }
+  });
   it('requires activation for follow-ups, persists tasks across restart, enforces ownership, and preserves data through rollback', async () => {
     let demo = await createDemoApi({ databaseUrl: url.href, runWorker: false });
     const maya = {

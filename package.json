@@ -9,6 +9,7 @@
   "scripts": {
     "evolve:code": "node --env-file=.env tools/code-evolution.mjs",
     "evolve:preview": "node tools/code-evolution-preview.mjs",
+    "code:draft": "node --env-file=.env tools/code-draft.mjs",
     "dev": "pnpm --filter @evolvekit/demo-erp dev",
     "dev:api": "pnpm --filter @evolvekit/demo-api dev",
     "build": "turbo run build",

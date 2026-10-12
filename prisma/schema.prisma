@@ -14,6 +14,59 @@ model Application {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 }
 
+model CodeProposal {
+  id String @id
+  applicationId String
+  tenantId String
+  requesterId String
+  request String
+  cases Json
+  state String @default("Queued")
+  lockVersion Int @default(0)
+  baseGeneration Int
+  baseCommit String
+  summary String?
+  source Json?
+  contentHash String?
+  report Json?
+  error String?
+  leaseUntil DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, tenantId, id])
+  @@index([applicationId, tenantId, createdAt])
+}
+
+model CodeApproval {
+  id String @id
+  applicationId String
+  tenantId String
+  proposalId String @unique
+  contentHash String
+  reviewerId String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model CodeActive {
+  applicationId String
+  tenantId String
+  proposalId String?
+  generation Int @default(0)
+  @@id([applicationId, tenantId])
+}
+
+model CodeRelease {
+  id String @id
+  applicationId String
+  tenantId String
+  proposalId String?
+  previousProposalId String?
+  generation Int
+  kind String
+  actorId String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([applicationId, tenantId, generation])
+}
+
 model Tenant {
   applicationId String
   id String

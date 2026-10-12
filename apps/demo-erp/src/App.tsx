@@ -31,6 +31,7 @@ import {
 import { createApi, ApiError } from './api';
 import './backend.css';
 import { FollowUpsPanel, FollowUpsPage } from './FollowUps';
+import { CalculatorsPage } from './Calculators';
 import {
   CustomerForm,
   readDemoCustomers,
@@ -101,6 +102,12 @@ export default function App() {
   return (
     <>
       <nav className="workspace-pages" aria-label="Workspace pages">
+        <button
+          aria-current={pageId === 'calculators' ? 'page' : undefined}
+          onClick={() => setPageId('calculators')}
+        >
+          Calculators
+        </button>
         {['customers', 'orders'].map((id) => (
           <button
             key={id}
@@ -119,7 +126,9 @@ export default function App() {
           </button>
         )}
       </nav>
-      {pageId === 'followups' ? (
+      {pageId === 'calculators' ? (
+        <CalculatorsPage />
+      ) : pageId === 'followups' ? (
         <FollowUpsPage onInactive={() => setFollowUpsEnabled(false)} />
       ) : (
         <Workspace key={pageId} pageId={pageId} onFollowUpsEnabled={setFollowUpsEnabled} />
