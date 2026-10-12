@@ -1,0 +1,6 @@
+{
+  "proposalId": "a826486e-18d7-41ea-a122-a07ea00b389a",
+  "contentHash": "881bb8298b0737c7b1372d6a112be234f62972d5a9a6ff87085fbe69e7c4dc9d",
+  "baseCommit": "f73775d3483c63b328a9e42a0793a6afa9a49b29",
+  "summary": "Built-in discount example: check eligibility and explain the result. This starter uses fixed source and makes no AI call."
+}

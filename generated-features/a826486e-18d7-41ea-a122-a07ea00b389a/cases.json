@@ -1,0 +1,62 @@
+[
+  {
+    "input": {
+      "overdue": false,
+      "orderAmount": 10000,
+      "customerTier": "gold"
+    },
+    "expected": {
+      "reason": "Gold customer discount",
+      "eligible": true,
+      "discountPercent": 10
+    }
+  },
+  {
+    "input": {
+      "overdue": true,
+      "orderAmount": 20000,
+      "customerTier": "gold"
+    },
+    "expected": {
+      "reason": "Overdue payment",
+      "eligible": false,
+      "discountPercent": 0
+    }
+  },
+  {
+    "input": {
+      "overdue": false,
+      "orderAmount": 20000,
+      "customerTier": "silver"
+    },
+    "expected": {
+      "reason": "Standard pricing",
+      "eligible": false,
+      "discountPercent": 0
+    }
+  },
+  {
+    "input": {
+      "overdue": false,
+      "orderAmount": 9999,
+      "customerTier": "gold"
+    },
+    "expected": {
+      "reason": "Standard pricing",
+      "eligible": false,
+      "discountPercent": 0
+    }
+  },
+  {
+    "input": {
+      "overdue": false,
+      "orderAmount": 15000,
+      "customerTier": " GOLD "
+    },
+    "expected": {
+      "reason": "Gold customer discount",
+      "eligible": true,
+      "discountPercent": 10
+    }
+  }
+]
