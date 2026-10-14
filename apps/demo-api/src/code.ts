@@ -11,13 +11,23 @@ import {
   toolCasesSchema,
   matchesToolContract,
   type ToolRecord,
+  toolBindingSchema,
+  toolManualInputSchema,
+  validateToolBinding,
+  resolveToolInput,
+  toolReviewContent,
 } from '@evolvekit/core';
+import { toolDataSources, toolDataSource, toolDataChoices, toolDataRow } from './tool-data';
 import { EvolutionError, contentHash } from '@evolvekit/server';
 import { z } from 'zod';
 
 const casesSchema = toolCasesSchema;
 const createSchema = z
-  .object({ request: z.string().trim().min(1).max(4000), cases: casesSchema })
+  .object({
+    request: z.string().trim().min(1).max(4000),
+    cases: casesSchema,
+    binding: toolBindingSchema.optional(),
+  })
   .strict();
 const actionSchema = z
   .object({
@@ -35,6 +45,18 @@ type Draft = {
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const workspace = fileURLToPath(new URL('../../../', import.meta.url));
 const git = promisify(execFile);
+function bindingValidation<T>(action: () => T): T {
+  try {
+    return action();
+  } catch (error) {
+    if (error instanceof EvolutionError || error instanceof z.ZodError) throw error;
+    throw new EvolutionError(
+      422,
+      'INPUT_MAPPING',
+      error instanceof Error ? error.message : 'Check the workspace input mapping.',
+    );
+  }
+}
 export interface CodeEngine {
   baseCommit(): Promise<string>;
   generate(
@@ -124,7 +146,7 @@ export async function registerCodeRoutes(
     if (
       !p.source ||
       !p.contentHash ||
-      p.contentHash !== contentHash({ draft: p.source, cases: p.cases, request: p.request })
+      p.contentHash !== contentHash(toolReviewContent(p.source, p.cases, p.request, p.binding))
     )
       throw new EvolutionError(409, 'CONTENT_CHANGED', 'The source no longer matches this draft.');
   };
@@ -175,6 +197,14 @@ export async function registerCodeRoutes(
   app.post('/v1/code-proposals', async (request, reply) => {
     const identity = allow(request, 'code:request');
     const input = createSchema.parse(request.body);
+    if (input.binding)
+      bindingValidation(() =>
+        validateToolBinding(
+          input.binding!,
+          input.cases[0].input,
+          toolDataSource(identity, input.binding!.sourceId),
+        ),
+      );
     const key = z.string().uuid().parse(request.headers['idempotency-key']);
     const baseCommit = await engine.baseCommit();
     const proposal = await db.$transaction(async (tx) => {
@@ -205,6 +235,7 @@ export async function registerCodeRoutes(
       const active = await pointer(identity, tx);
       const created = await tx.codeProposal.create({
         data: {
+          ...(input.binding ? { binding: json(input.binding) } : {}),
           id: randomUUID(),
           ...scope(identity),
           requesterId: identity.principal.subjectId,
@@ -287,6 +318,16 @@ export async function registerCodeRoutes(
       const p = await find(identity, id, tx);
       verify(p);
       const approval = await tx.codeApproval.findUnique({ where: { proposalId: id } });
+      if (p.binding) {
+        const binding = toolBindingSchema.parse(p.binding);
+        bindingValidation(() =>
+          validateToolBinding(
+            binding,
+            (p.cases as Cases)[0].input,
+            toolDataSource(identity, binding.sourceId),
+          ),
+        );
+      }
       if (
         p.state !== 'Approved' ||
         p.lockVersion !== input.expectedVersion ||
@@ -366,11 +407,29 @@ export async function registerCodeRoutes(
       return next;
     });
   });
+  app.get('/v1/tool-data', async (request) => {
+    const identity = allow(request, 'code:data');
+    for (const source of toolDataSources) toolDataSource(identity, source.id);
+    return { sources: toolDataSources };
+  });
+  app.get('/v1/tool-data/:sourceId', async (request) => {
+    const identity = allow(request, 'code:data');
+    const { sourceId } = z.object({ sourceId: z.string().max(100) }).parse(request.params);
+    return { records: toolDataChoices(identity, sourceId) };
+  });
   let evaluating = false;
   app.post('/v1/code-evaluate', async (request) => {
     const identity = allow(request, 'code:read');
-    const { proposalId, input } = z
-      .object({ proposalId: z.string().uuid().nullable(), input: toolRecordSchema })
+    const {
+      proposalId,
+      input: manual,
+      recordId,
+    } = z
+      .object({
+        proposalId: z.string().uuid().nullable(),
+        input: toolManualInputSchema,
+        recordId: z.string().min(1).max(100).optional(),
+      })
       .strict()
       .parse(request.body);
     const active = proposalId === null ? await pointer(identity) : null;
@@ -378,6 +437,26 @@ export async function registerCodeRoutes(
     if (!id) throw new EvolutionError(409, 'INACTIVE', 'No calculator is active yet.');
     const p = await find(identity, id);
     verify(p);
+    const binding = p.binding == null ? null : toolBindingSchema.parse(p.binding);
+    if ((binding && !recordId) || (!binding && recordId))
+      throw new EvolutionError(
+        422,
+        'RECORD_REQUIRED',
+        binding
+          ? 'Choose a workspace record for this tool.'
+          : 'This tool uses manually entered values.',
+      );
+    const input = binding
+      ? bindingValidation(() =>
+          resolveToolInput(
+            binding,
+            (p.cases as Cases)[0].input,
+            toolDataSource(identity, binding.sourceId),
+            manual,
+            toolDataRow(identity, binding.sourceId, recordId!),
+          ),
+        )
+      : toolRecordSchema.parse(manual);
     if (!['Ready', 'PendingApproval', 'Approved', 'Published'].includes(p.state))
       throw new EvolutionError(409, 'NOT_READY', 'Wait for this calculator to finish its checks.');
     if (!matchesToolContract(input, (p.cases as Cases)[0].input))
@@ -398,6 +477,8 @@ export async function registerCodeRoutes(
       return {
         ...evaluated,
         result,
+        effectiveInput: input,
+        recordId: recordId ?? null,
         proposalId: id,
         generation: active?.generation ?? null,
       };
@@ -447,7 +528,7 @@ export async function registerCodeRoutes(
             state: 'Ready',
             source: json(draft),
             summary: draft.summary,
-            contentHash: contentHash({ draft, cases: p.cases, request: p.request }),
+            contentHash: contentHash(toolReviewContent(draft, p.cases, p.request, p.binding)),
             report: json(report),
             leaseUntil: null,
             lockVersion: { increment: 1 },

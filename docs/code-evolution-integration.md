@@ -21,6 +21,20 @@ The API in `apps/demo-api/src/code.ts` exposes `GET/POST /v1/code-proposals`, pr
 
 States are Queued → Generating → Ready → PendingApproval → Approved → Published, with generation errors entering Failed. `CodeProposal`, `CodeApproval`, `CodeActive`, and `CodeRelease` persist the lifecycle. Database constraints protect scope, immutable generated source, approvals, and release history. The existing framework-independent Capability Registry remains separate from this experimental generated-code path.
 
+## Workspace data inputs
+
+Expand **Use values from your workspace** when creating a draft. Choose Orders or Customers, then select a compatible registered field for each input to read. For the free discount example, map **Order amount** to the Orders **Order amount** field and leave tier and overdue status manual; those values are not part of the Orders data contract. Build a new preview, select a workspace order, and run the tool. The result shows the exact values read for that run.
+
+The mapping is immutable from request creation and included in the source approval fingerprint. Mapping changes require a new proposal and approval. Old unbound proposal hashes remain unchanged. The mapping contains a pinned data-source contract version, source ID, and input-to-field pairs. The framework-independent resolver reads only those fields and rejects browser overrides, mismatched value types, missing fields, extra inputs, unknown fields, and stale contracts. Preview and active execution use the same resolver and source adapter. Data permission is checked again on every read and activation.
+
+The loopback host registers read-only synthetic Orders and Customers adapters for demo-org and requires `code:data`. Record listing returns IDs and display labels; evaluation reads mapped fields from the selected server-side record. Only approved mapped values and remaining manual inputs enter the local Docker runner. Workspace rows are never sent to Gemini. The current adapters use the server fixtures shared with the demo tables; browser-only customer additions are not included. A production host must provide its own tenant-scoped adapter and authentication.
+
+The additive `202610140007_tool_bindings` migration adds a nullable binding to CodeProposal and a database trigger preventing later edits. Git export includes `binding.json` alongside source and independent cases. Rollback preserves the original mapping. Data-source contract changes make evaluation fail until a new compatible proposal is checked.
+
+### Verification status for workspace bindings
+
+Unit checks cover field projection, type compatibility, forged-value rejection, permission and tenant isolation, and legacy review hashes. The PostgreSQL integration test covers immutable mappings and equal effective inputs across preview, activation, and rollback. Applying the migration and running that integration check require the dedicated database and Docker engine to be available.
+
 ## Developer source review
 
 Commit the host implementation before generating a draft, so its base commit remains current. Export only checked source:

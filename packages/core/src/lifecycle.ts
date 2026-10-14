@@ -1,6 +1,7 @@
 import type { RuntimeOperation, TableConfiguration } from './index';
 
 export type Permission =
+  | 'code:data'
   | 'code:read'
   | 'code:request'
   | 'code:submit'

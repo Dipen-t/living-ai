@@ -21,6 +21,7 @@ model CodeProposal {
   requesterId String
   request String
   cases Json
+  binding Json?
   state String @default("Queued")
   lockVersion Int @default(0)
   baseGeneration Int

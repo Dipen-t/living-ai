@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
+import { toolReviewContent } from '../packages/core/dist/index.js';
 import { command, hash, validateDraft, validateCases, workspace } from './code-evolution.mjs';
 
 const [operation, id, reviewUrl] = process.argv.slice(2);
@@ -16,7 +17,10 @@ try {
     throw new Error('A checked code draft is required.');
   const draft = validateDraft(proposal.source),
     cases = validateCases(proposal.cases);
-  if (hash({ draft, cases, request: proposal.request }) !== proposal.contentHash)
+  if (
+    hash(toolReviewContent(draft, cases, proposal.request, proposal.binding)) !==
+    proposal.contentHash
+  )
     throw new Error('Source fingerprint does not match this proposal.');
   const scope = { applicationId: proposal.applicationId, tenantId: proposal.tenantId };
   const actorId = (await command('git', ['config', '--local', 'user.name'])).trim();
@@ -67,6 +71,7 @@ try {
       await command('git', ['read-tree', head], { env });
       const files = {
         ...draft.files,
+        ...(proposal.binding ? { 'binding.json': JSON.stringify(proposal.binding, null, 2) } : {}),
         'cases.json': JSON.stringify(cases, null, 2),
         'review.json': JSON.stringify(
           {
@@ -118,7 +123,9 @@ try {
         const existingTree = (await command('git', ['rev-parse', branch + '^{tree}'])).trim();
         const parents = (await command('git', ['show', '-s', '--format=%P', existing])).trim();
         if (existingTree !== tree || parents !== head)
-          throw new Error('The export branch contains different source. It will not be overwritten.');
+          throw new Error(
+            'The export branch contains different source. It will not be overwritten.',
+          );
         sourceCommit = existing;
       } else {
         await command('git', ['update-ref', 'refs/heads/' + branch, sourceCommit, '0'.repeat(40)]);
