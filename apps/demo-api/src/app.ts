@@ -30,6 +30,7 @@ export const demoAccounts: Record<string, DemoSession> = {
     principal: { applicationId: 'demo-erp', tenantId: 'demo-org', subjectId: 'maya' },
     permissions: [
       'code:read',
+      'code:data',
       'code:request',
       'code:submit',
       'evolution:read',
@@ -47,6 +48,7 @@ export const demoAccounts: Record<string, DemoSession> = {
     principal: { applicationId: 'demo-erp', tenantId: 'demo-org', subjectId: 'arun' },
     permissions: [
       'code:read',
+      'code:data',
       'code:approve',
       'code:activate',
       'code:rollback',

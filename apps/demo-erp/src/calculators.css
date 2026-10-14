@@ -125,6 +125,22 @@
   gap: 18px;
   margin: 24px 0;
 }
+.calculator-record {
+  margin-top: 24px;
+}
+.calculator-record span {
+  color: #54717b;
+  font-size: 13px;
+}
+.calculator-mapped-value {
+  padding: 11px;
+  background: #e8f5ef;
+  border-radius: 6px;
+  line-height: 1.5;
+}
+.calculator-binding label {
+  margin: 16px 0;
+}
 .calculator-results {
   display: flex;
   gap: 40px;

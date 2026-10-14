@@ -2,6 +2,7 @@ import { z } from 'zod';
 export type * from './lifecycle';
 export * from './generated-tools';
 export { discountExample } from './tool-examples';
+export * from './tool-binding';
 
 const id = z
   .string()

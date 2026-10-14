@@ -541,6 +541,169 @@ describe('Durable proposal planning', () => {
       await demo.app.close();
     }
   });
+  it('pins workspace mappings, rejects overridden values, and shares record inputs between preview and activation', async () => {
+    const cases = [1, 2, 3].map((amount) => ({
+      input: { amount, rate: 2 },
+      expected: { total: amount * 2 },
+    }));
+    const draft = {
+      featureId: 'bound-total',
+      summary: 'Bound order calculation',
+      files: {
+        'logic.ts':
+          'export function evaluate(input: Record<string,number>) { return { total: input.amount * input.rate }; }',
+        'Feature.tsx':
+          'import React from "react"; export function Feature() { return <div>Checked</div>; }',
+      },
+    };
+    const demo = await createDemoApi({
+      databaseUrl: url.href,
+      runWorker: true,
+      codeEngine: {
+        async baseCommit() {
+          return 'd'.repeat(40);
+        },
+        async generate() {
+          return { draft, report: { passed: 3, preview: '<div>Checked</div>' } };
+        },
+        async evaluate(_draft, _cases, _request, input) {
+          return {
+            result: { total: Number(input.amount) * Number(input.rate) },
+            preview: '<div>Checked</div>',
+          };
+        },
+      },
+    });
+    const origin = 'http://127.0.0.1:5173';
+    const post = (cookie: string, route: string, payload: unknown) =>
+      demo.app.inject({
+        method: 'POST',
+        url: route,
+        headers: {
+          origin,
+          cookie,
+          'content-type': 'application/json',
+          'idempotency-key': randomUUID(),
+        },
+        payload: JSON.stringify(payload),
+      });
+    const login = async (account: string) =>
+      String((await post('', '/demo/session', { account })).headers['set-cookie']).split(';')[0];
+    const get = (cookie: string, route: string) =>
+      demo.app.inject({ method: 'GET', url: route, headers: { cookie } });
+    try {
+      expect((await get('', '/v1/tool-data')).statusCode).toBe(401);
+      const maya = await login('requester'),
+        arun = await login('approver');
+      const source = (await get(maya, '/v1/tool-data'))
+        .json()
+        .sources.find((source: any) => source.id === 'orders');
+      const binding = {
+        sourceId: source.id,
+        sourceVersion: source.version,
+        mappings: [{ inputId: 'amount', fieldId: 'amount' }],
+      };
+      expect(
+        (
+          await post(maya, '/v1/code-proposals', {
+            request: 'Bound amount',
+            cases,
+            binding: { ...binding, sourceVersion: '0'.repeat(64) },
+          })
+        ).statusCode,
+      ).toBe(422);
+      const baseline = (await get(maya, '/v1/code-proposals')).json().active;
+      const created = await post(maya, '/v1/code-proposals', {
+        request: 'Bound amount',
+        cases,
+        binding,
+      });
+      expect(created.statusCode).toBe(202);
+      const id = created.json().id;
+      let proposal: any;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        proposal = await demo.db.codeProposal.findUnique({ where: { id } });
+        if (proposal?.state === 'Ready') break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(proposal.state).toBe('Ready');
+      await expect(
+        demo.db.codeProposal.update({
+          where: { id },
+          data: { binding: { ...binding, mappings: [{ inputId: 'amount', fieldId: 'revenue' }] } },
+        }),
+      ).rejects.toThrow('immutable');
+      expect(
+        (
+          await post(maya, '/v1/code-evaluate', {
+            proposalId: id,
+            input: { amount: 1, rate: 2 },
+            recordId: 'o1',
+          })
+        ).statusCode,
+      ).toBe(422);
+      expect(
+        (
+          await post(maya, '/v1/code-evaluate', {
+            proposalId: id,
+            input: { rate: 2 },
+            recordId: 'unknown',
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect(
+        (await post(maya, '/v1/code-evaluate', { proposalId: id, input: { rate: 2 } })).statusCode,
+      ).toBe(422);
+      const preview = (
+        await post(maya, '/v1/code-evaluate', {
+          proposalId: id,
+          input: { rate: 2 },
+          recordId: 'o1',
+        })
+      ).json();
+      expect(preview.result).toEqual({ total: 368000 });
+      expect(preview.effectiveInput).toEqual({ amount: 184000, rate: 2 });
+      const action = () => ({
+        contentHash: proposal.contentHash,
+        expectedVersion: proposal.lockVersion,
+      });
+      expect((await post(maya, `/v1/code-proposals/${id}/submit`, action())).statusCode).toBe(200);
+      proposal = await demo.db.codeProposal.findUnique({ where: { id } });
+      expect((await post(arun, `/v1/code-proposals/${id}/approve`, action())).statusCode).toBe(200);
+      proposal = await demo.db.codeProposal.findUnique({ where: { id } });
+      expect(
+        (
+          await post(arun, `/v1/code-proposals/${id}/activate`, {
+            ...action(),
+            expectedGeneration: baseline.generation,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await post(maya, '/v1/code-evaluate', {
+            proposalId: null,
+            input: { rate: 2 },
+            recordId: 'o1',
+          })
+        ).json().result,
+      ).toEqual(preview.result);
+      const release = await demo.db.codeRelease.findFirst({ where: { proposalId: id } });
+      expect(
+        (
+          await post(arun, '/v1/code-rollback', {
+            releaseId: release!.id,
+            expectedGeneration: baseline.generation + 1,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect((await get(maya, '/v1/code-proposals')).json().active.proposalId).toBe(
+        baseline.proposalId,
+      );
+    } finally {
+      await demo.app.close();
+    }
+  });
   it('requires activation for follow-ups, persists tasks across restart, enforces ownership, and preserves data through rollback', async () => {
     let demo = await createDemoApi({ databaseUrl: url.href, runWorker: false });
     const maya = {

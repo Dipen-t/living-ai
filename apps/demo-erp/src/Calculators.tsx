@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DemoSession, ToolRecord } from '@evolvekit/core';
+import type { DemoSession, ToolRecord, ToolBinding, ToolDataSource } from '@evolvekit/core';
 import { discountExample } from '@evolvekit/core';
 import { createApi, request } from './api';
 import './calculators.css';
@@ -18,6 +18,7 @@ type Proposal = {
   baseCommit: string;
   report: { passed: number } | null;
   reviewUrl: string | null;
+  binding: ToolBinding | null;
 };
 type Listing = {
   proposals: Proposal[];
@@ -79,6 +80,18 @@ export function CalculatorsPage() {
     [data, setData] = useState<Listing | null>(null);
   const [text, setText] = useState(defaultRequest),
     [caseText, setCaseText] = useState(JSON.stringify(cases, null, 2));
+  const [sources, setSources] = useState<ToolDataSource[]>([]),
+    [sourceId, setSourceId] = useState(''),
+    [mappings, setMappings] = useState<Record<string, string>>({});
+  const [records, setRecords] = useState<{ id: string; label: string }[]>([]),
+    [recordId, setRecordId] = useState('');
+  const [effectiveInput, setEffectiveInput] = useState<ToolRecord | null>(null);
+  let requestExample: ToolRecord = {};
+  try {
+    requestExample = JSON.parse(caseText)[0]?.input ?? {};
+  } catch {
+    /* The request editor reports invalid examples on submission. */
+  }
   const [selected, setSelected] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
@@ -102,9 +115,37 @@ export function CalculatorsPage() {
     const timer = setInterval(() => void refresh().catch(() => {}), 3000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (!identity?.permissions.includes('code:data')) {
+      setSources([]);
+      return;
+    }
+    void request<{ sources: ToolDataSource[] }>('/v1/tool-data')
+      .then((value) => setSources(value.sources))
+      .catch(() => setSources([]));
+  }, [identity?.principal.subjectId]);
   const proposal = data?.proposals.find(
     (p) => p.id === (mode === 'active' ? data.active.proposalId : selected),
   );
+  useEffect(() => {
+    let current = true;
+    setRecordId('');
+    setRecords([]);
+    setEffectiveInput(null);
+    if (proposal?.binding)
+      void request<{ records: { id: string; label: string }[] }>(
+        '/v1/tool-data/' + proposal.binding.sourceId,
+      )
+        .then((value) => {
+          if (current) setRecords(value.records);
+        })
+        .catch((error) => {
+          if (current) setMessage(error.message);
+        });
+    return () => {
+      current = false;
+    };
+  }, [proposal?.id, proposal?.contentHash, identity?.principal.subjectId, mode]);
   useEffect(() => {
     epoch.current++;
     setChecked(false);
@@ -227,19 +268,79 @@ export function CalculatorsPage() {
                   />
                 </label>
               </details>
+              <details className="calculator-binding">
+                <summary>Use values from your workspace</summary>
+                <p>
+                  Choose the fields this tool can read. This mapping is included in source approval.
+                  Other inputs stay manual.
+                </p>
+                <label>
+                  Data source
+                  <select
+                    value={sourceId}
+                    onChange={(event) => {
+                      setSourceId(event.target.value);
+                      setMappings({});
+                    }}
+                  >
+                    <option value="">Enter all values manually</option>
+                    {sources.map((source) => (
+                      <option key={source.id} value={source.id}>
+                        {source.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {sourceId &&
+                  Object.entries(requestExample).map(([inputId, value]) => (
+                    <label key={inputId}>
+                      {friendlyName(inputId)}
+                      <select
+                        value={mappings[inputId] ?? ''}
+                        onChange={(event) =>
+                          setMappings({ ...mappings, [inputId]: event.target.value })
+                        }
+                      >
+                        <option value="">Enter manually</option>
+                        {sources
+                          .find((source) => source.id === sourceId)
+                          ?.fields.filter((field) => field.type === typeof value)
+                          .map((field) => (
+                            <option key={field.id} value={field.id}>
+                              {field.label}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  ))}
+              </details>
               <button
                 className="primary-button"
                 disabled={busy || !text.trim()}
                 onClick={() =>
                   void act(async () => {
                     const parsed = JSON.parse(caseText),
-                      fingerprint = JSON.stringify({ text, parsed });
+                      binding = sourceId
+                        ? {
+                            sourceId,
+                            sourceVersion: sources.find((source) => source.id === sourceId)!
+                              .version,
+                            mappings: Object.entries(mappings)
+                              .filter(([, fieldId]) => fieldId)
+                              .map(([inputId, fieldId]) => ({ inputId, fieldId })),
+                          }
+                        : undefined,
+                      fingerprint = JSON.stringify({ text, parsed, binding });
+                    if (binding && binding.mappings.length === 0)
+                      throw new Error(
+                        'Choose at least one workspace field, or enter all values manually.',
+                      );
                     if (proposal?.state === 'Failed') key.current = null;
                     if (key.current?.text !== fingerprint)
                       key.current = { text: fingerprint, key: crypto.randomUUID() };
                     const p = await request<Proposal>(
                       '/v1/code-proposals',
-                      { request: text, cases: parsed },
+                      { request: text, cases: parsed, ...(binding ? { binding } : {}) },
                       key.current.key,
                     );
                     setSelected(p.id);
@@ -278,11 +379,45 @@ export function CalculatorsPage() {
           )}
           {ready && (
             <>
+              {proposal.binding && (
+                <label className="calculator-record">
+                  Choose a{' '}
+                  {proposal.binding.sourceId === 'orders'
+                    ? 'workspace order'
+                    : 'workspace customer'}
+                  <select
+                    value={recordId}
+                    disabled={busy}
+                    onChange={(event) => {
+                      epoch.current++;
+                      setRecordId(event.target.value);
+                      setEffectiveInput(null);
+                      setResult(null);
+                      setPreview('');
+                      setChecked(false);
+                    }}
+                  >
+                    <option value="">Choose a record</option>
+                    {records.map((record) => (
+                      <option key={record.id} value={record.id}>
+                        {record.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span>The tool reads only its approved mapped fields when you run it.</span>
+                </label>
+              )}
               <div className="calculator-inputs">
                 {Object.entries(input).map(([name, value]) => (
                   <label key={name}>
                     {friendlyName(name)}
-                    {typeof proposal.cases[0].input[name] === 'boolean' ? (
+                    {proposal.binding?.mappings.some((mapping) => mapping.inputId === name) ? (
+                      <span className="calculator-mapped-value">
+                        {effectiveInput
+                          ? String(effectiveInput[name])
+                          : 'Read from the selected workspace record when run'}
+                      </span>
+                    ) : typeof proposal.cases[0].input[name] === 'boolean' ? (
                       <select
                         value={value}
                         disabled={busy}
@@ -319,8 +454,10 @@ export function CalculatorsPage() {
               <button
                 disabled={
                   busy ||
+                  (!!proposal.binding && !recordId) ||
                   Object.entries(input).some(
                     ([key, value]) =>
+                      !proposal.binding?.mappings.some((mapping) => mapping.inputId === key) &&
                       typeof proposal.cases[0].input[key] === 'number' &&
                       (value.trim() === '' || !Number.isFinite(Number(value))),
                   )
@@ -332,17 +469,26 @@ export function CalculatorsPage() {
                       result: ToolRecord;
                       preview: string;
                       proposalId: string;
+                      effectiveInput: ToolRecord;
                     }>('/v1/code-evaluate', {
                       proposalId: mode === 'active' ? null : proposal.id,
+                      ...(proposal.binding ? { recordId } : {}),
                       input: Object.fromEntries(
-                        Object.entries(input).map(([k, v]) => [
-                          k,
-                          typeof proposal.cases[0].input[k] === 'number'
-                            ? Number(v)
-                            : typeof proposal.cases[0].input[k] === 'boolean'
-                              ? v === 'true'
-                              : v,
-                        ]),
+                        Object.entries(input)
+                          .filter(
+                            ([key]) =>
+                              !proposal.binding?.mappings.some(
+                                (mapping) => mapping.inputId === key,
+                              ),
+                          )
+                          .map(([k, v]) => [
+                            k,
+                            typeof proposal.cases[0].input[k] === 'number'
+                              ? Number(v)
+                              : typeof proposal.cases[0].input[k] === 'boolean'
+                                ? v === 'true'
+                                : v,
+                          ]),
                       ),
                     });
                     if (current !== epoch.current) return;
@@ -350,6 +496,7 @@ export function CalculatorsPage() {
                       throw new Error('The active tool changed. Refresh and try again.');
                     setPreview(value.preview);
                     setResult(value.result);
+                    setEffectiveInput(value.effectiveInput);
                   }, 'Tool finished.')
                 }
               >
@@ -401,6 +548,22 @@ export function CalculatorsPage() {
               </p>
               <details className="calculator-source">
                 <summary>Review the generated source</summary>
+                {proposal.binding && (
+                  <div>
+                    <h3>Workspace data this version can read</h3>
+                    <p>Source: {proposal.binding.sourceId}</p>
+                    <ul>
+                      {proposal.binding.mappings.map((mapping) => (
+                        <li key={mapping.inputId}>
+                          {friendlyName(mapping.inputId)} reads {mapping.fieldId}
+                        </li>
+                      ))}
+                    </ul>
+                    <p>
+                      Data contract: <code>{proposal.binding.sourceVersion}</code>
+                    </p>
+                  </div>
+                )}
                 {proposal.reviewUrl && (
                   <p>
                     <a href={proposal.reviewUrl} target="_blank" rel="noreferrer">

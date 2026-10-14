@@ -51,6 +51,8 @@ The React API accepts direct registry/configuration/rows props. The demo supplie
 
 ## Try the milestone
 
+Business tools can also read selected registered fields from workspace Orders or Customers. Expand **Use values from your workspace**, map a compatible field, and build a new draft. Choose a record when trying the tool; the approved mapping is shared by preview and active execution. For the free discount example, map Order amount from Orders and enter tier and overdue status manually. These are read-only synthetic server adapters; browser-only customer additions are not included. This milestone requires the new tool-binding database migration before starting the API.
+
 1. Change the inactivity window and compare matching rows with the unchanged baseline.
 2. Hide Revenue or reorder columns using the arrow controls.
 3. Include the Customer follow-up saved view and select it in the preview.
