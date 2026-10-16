@@ -3,6 +3,7 @@ import type { DemoSession, ToolRecord, ToolBinding, ToolDataSource } from '@evol
 import { discountExample } from '@evolvekit/core';
 import { createApi, request } from './api';
 import './calculators.css';
+import { ToolResult } from './ToolView';
 
 type Case = { input: ToolRecord; expected: ToolRecord };
 type Proposal = {
@@ -502,44 +503,7 @@ export function CalculatorsPage() {
               >
                 Try these inputs
               </button>
-              {result && (
-                <div className="calculator-results" aria-live="polite">
-                  {Object.entries(result).map(([name, value]) => (
-                    <p key={name}>
-                      <span>
-                        {name === 'fee'
-                          ? 'Late fee'
-                          : name === 'total'
-                            ? 'Total amount'
-                            : friendlyName(name)}
-                      </span>
-                      <strong>
-                        {typeof value === 'number'
-                          ? new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(
-                              value,
-                            )
-                          : typeof value === 'boolean'
-                            ? value
-                              ? 'Yes'
-                              : 'No'
-                            : value}
-                      </strong>
-                    </p>
-                  ))}
-                </div>
-              )}
-              {preview && (
-                <iframe
-                  title="Generated tool result"
-                  className="calculator-frame"
-                  sandbox=""
-                  srcDoc={
-                    "<!doctype html><html><head><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'\"><style>body{font:16px system-ui;color:#183640;margin:20px;line-height:1.6}</style></head><body>" +
-                    preview +
-                    '</body></html>'
-                  }
-                />
-              )}
+              <ToolResult result={result} preview={preview} />
               <p className="calculator-note">
                 {mode === 'preview'
                   ? String(proposal.report?.passed ?? 0) +

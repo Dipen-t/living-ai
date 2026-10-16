@@ -99,6 +99,7 @@ export interface EvolvableTableProps {
   itemLabel?: string;
   searchPlaceholder?: string;
   actionHandlers?: Readonly<Record<string, () => void>>;
+  rowAction?: { label: string; onSelect: (row: Record<string, unknown>) => void };
 }
 export function EvolvableTable(props: EvolvableTableProps) {
   const { configuration, page, evaluationTime } = useActiveConfiguration(props.pageId);
@@ -119,6 +120,7 @@ const numberFormatters = {
 };
 function TableRuntime({
   actionHandlers,
+  rowAction,
   rows,
   caption,
   rowKey,
@@ -233,6 +235,7 @@ function TableRuntime({
                   {c.label}
                 </th>
               ))}
+              {rowAction && <th scope="col">Tool</th>}
             </tr>
           </thead>
           <tbody>
@@ -257,6 +260,13 @@ function TableRuntime({
                     )}
                   </td>
                 ))}
+                {rowAction && (
+                  <td>
+                    <button type="button" onClick={() => rowAction.onSelect(row)}>
+                      {rowAction.label}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
