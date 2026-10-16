@@ -35,6 +35,16 @@ The additive `202610140007_tool_bindings` migration adds a nullable binding to C
 
 Unit checks cover field projection, type compatibility, forged-value rejection, permission and tenant isolation, and legacy review hashes. The PostgreSQL integration test covers immutable mappings and equal effective inputs across preview, activation, and rollback. Applying the migration and running that integration check require the dedicated database and Docker engine to be available.
 
+## Use an approved tool from Orders
+
+After activating a tool whose approved binding reads Orders, each visible order has a **Use tool** action. The fixed discount starter uses **Check discount**. Selecting it opens an inline panel with that order already selected; only unmapped inputs are editable. The panel shows the exact workspace values read for the run and shares the result renderer with Business tools. Running the tool never changes the order.
+
+The action is available only for the current active Published tool and requires code:read and code:data. Drafts and tools bound to Customers do not add Orders actions. A lightweight `GET /v1/code-tools/active?sourceId=orders` lookup follows the active pointer directly, so it does not depend on whether that proposal is among the latest 30 drafts and does not send generated source files on each poll. Activation, rollback, account changes, or loss of access close the old panel and clear its results.
+
+Inline runs send `proposalId: null`, the selected `recordId`, manual `input`, and `expectedActive: { proposalId, generation }`. The server rejects a stale panel before evaluation and rechecks the active pointer after execution. A changed generation produces HTTP 409 rather than a result from an obsolete active version. The optional guard preserves compatibility with existing preview clients. Host table row actions are an optional React adapter prop; the evolution and binding contracts remain independent of React.
+
+Transport tests with isolated in-memory dependencies cover the metadata response, hidden actions after rollback, stale panels, effective workspace values, and an activation change during execution. The table test checks that row actions follow visible rows. These tests do not replace the pending PostgreSQL and live Docker verification.
+
 ## Developer source review
 
 Commit the host implementation before generating a draft, so its base commit remains current. Export only checked source:

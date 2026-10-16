@@ -1,0 +1,60 @@
+.order-tool {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1px solid #bbd0d7;
+  border-left: 4px solid #286581;
+  border-radius: 6px;
+  background: #f5fafb;
+  color: #183640;
+}
+.order-tool header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.order-tool h3 {
+  margin: 0;
+  font-size: 23px;
+}
+.order-tool h3:focus {
+  outline: none;
+}
+.order-tool p {
+  max-width: 80ch;
+  line-height: 1.6;
+}
+.order-tool-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 20px 0;
+}
+.order-tool label {
+  display: grid;
+  gap: 8px;
+}
+.order-tool input,
+.order-tool select {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px;
+  border: 1px solid #bbd0d7;
+  border-radius: 6px;
+  background: white;
+  color: #183640;
+  font: inherit;
+}
+.order-tool-values {
+  font-size: 14px;
+  color: #54717b;
+}
+@media (max-width: 650px) {
+  .order-tool {
+    padding: 16px;
+  }
+  .order-tool-inputs {
+    grid-template-columns: 1fr;
+  }
+}

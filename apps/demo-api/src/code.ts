@@ -412,6 +412,40 @@ export async function registerCodeRoutes(
     for (const source of toolDataSources) toolDataSource(identity, source.id);
     return { sources: toolDataSources };
   });
+  app.get('/v1/code-tools/active', async (request) => {
+    const identity = allow(request, 'code:read');
+    allow(request, 'code:data');
+    const { sourceId } = z
+      .object({ sourceId: z.enum(['orders', 'customers']) })
+      .strict()
+      .parse(request.query);
+    toolDataSource(identity, sourceId);
+    const active = await pointer(identity);
+    if (!active.proposalId) return { tool: null };
+    const proposal = await find(identity, active.proposalId);
+    if (proposal.state !== 'Published' || !proposal.binding) return { tool: null };
+    const binding = toolBindingSchema.parse(proposal.binding);
+    if (binding.sourceId !== sourceId) return { tool: null };
+    verify(proposal);
+    bindingValidation(() =>
+      validateToolBinding(
+        binding,
+        (proposal.cases as Cases)[0].input,
+        toolDataSource(identity, sourceId),
+      ),
+    );
+    return {
+      tool: {
+        id: proposal.id,
+        generation: active.generation,
+        summary: proposal.summary,
+        state: proposal.state,
+        binding,
+        cases: [{ input: (proposal.cases as Cases)[0].input }],
+        source: { featureId: (proposal.source as Draft).featureId },
+      },
+    };
+  });
   app.get('/v1/tool-data/:sourceId', async (request) => {
     const identity = allow(request, 'code:data');
     const { sourceId } = z.object({ sourceId: z.string().max(100) }).parse(request.params);
@@ -424,15 +458,31 @@ export async function registerCodeRoutes(
       proposalId,
       input: manual,
       recordId,
+      expectedActive,
     } = z
       .object({
         proposalId: z.string().uuid().nullable(),
         input: toolManualInputSchema,
         recordId: z.string().min(1).max(100).optional(),
+        expectedActive: z
+          .object({ proposalId: z.string().uuid(), generation: z.number().int().nonnegative() })
+          .strict()
+          .optional(),
       })
       .strict()
       .parse(request.body);
     const active = proposalId === null ? await pointer(identity) : null;
+    if (
+      expectedActive &&
+      (!active ||
+        expectedActive.proposalId !== active.proposalId ||
+        expectedActive.generation !== active.generation)
+    )
+      throw new EvolutionError(
+        409,
+        'ACTIVE_CHANGED',
+        'The active tool changed. Reopen it and try again.',
+      );
     const id = proposalId ?? active?.proposalId;
     if (!id) throw new EvolutionError(409, 'INACTIVE', 'No calculator is active yet.');
     const p = await find(identity, id);
@@ -474,6 +524,15 @@ export async function registerCodeRoutes(
       const result = toolRecordSchema.parse(evaluated.result);
       if (!matchesToolContract(result, (p.cases as Cases)[0].expected))
         throw new Error('Output does not match the reviewed contract.');
+      if (active) {
+        const current = await pointer(identity);
+        if (current.proposalId !== active.proposalId || current.generation !== active.generation)
+          throw new EvolutionError(
+            409,
+            'ACTIVE_CHANGED',
+            'The active tool changed while running. Reopen it and try again.',
+          );
+      }
       return {
         ...evaluated,
         result,
@@ -482,7 +541,8 @@ export async function registerCodeRoutes(
         proposalId: id,
         generation: active?.generation ?? null,
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof EvolutionError) throw error;
       throw new EvolutionError(
         422,
         'CALCULATION_FAILED',

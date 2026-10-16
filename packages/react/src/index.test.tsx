@@ -42,6 +42,25 @@ const provider = (configuration: typeof baseline, children: React.ReactNode) => 
 const tables = (html: string) => html.match(/<table>[\s\S]*?<\/table>/g);
 
 describe('shared renderer', () => {
+  it('adds host-owned tool actions only to visible rows and leaves normal tables unchanged', () => {
+    const html = renderToStaticMarkup(
+      provider(
+        proposed,
+        <EvolvableTable
+          pageId="customers"
+          rows={customers}
+          rowKey="id"
+          caption="Customers"
+          rowAction={{ label: 'Check discount', onSelect: () => {} }}
+        />,
+      ),
+    );
+    const count = (html.match(/>Check discount<\/button>/g) ?? []).length;
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThan(customers.length);
+    expect(count).toBe((html.match(/<tbody>[\s\S]*<\/tbody>/)?.[0].match(/<tr/g) ?? []).length);
+    expect(renderToStaticMarkup(provider(proposed, table))).not.toContain('Check discount');
+  });
   it('renders renamed columns identically in preview and production', () => {
     const changed = applyOperations(
       baseline,

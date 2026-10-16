@@ -32,6 +32,7 @@ import { createApi, ApiError } from './api';
 import './backend.css';
 import { FollowUpsPanel, FollowUpsPage } from './FollowUps';
 import { CalculatorsPage } from './Calculators';
+import { OrderTool } from './OrderTool';
 import {
   CustomerForm,
   readDemoCustomers,
@@ -1294,15 +1295,20 @@ function Workspace({
                   </div>
                   <span className="quiet-badge">{active ? 'Current view' : 'Sample view'}</span>
                 </div>
-                <EvolvableTable
-                  pageId={pageId}
-                  rows={rows}
-                  rowKey="id"
-                  itemLabel={noun}
-                  searchPlaceholder={`Find a ${singular}…`}
-                  caption={`Active ${noun} table`}
-                  actionHandlers={{ 'open-customer-form': () => setCustomerForm('active') }}
-                />
+                <OrderTool session={pageId === 'orders' ? session : null}>
+                  {(rowAction) => (
+                    <EvolvableTable
+                      pageId={pageId}
+                      rows={rows}
+                      rowKey="id"
+                      itemLabel={noun}
+                      searchPlaceholder={`Find a ${singular}…`}
+                      caption={`Active ${noun} table`}
+                      rowAction={rowAction}
+                      actionHandlers={{ 'open-customer-form': () => setCustomerForm('active') }}
+                    />
+                  )}
+                </OrderTool>
                 {currentConfig.enabledFeatures?.includes('customer-followups') && (
                   <FollowUpsPanel
                     key={active?.generation}
